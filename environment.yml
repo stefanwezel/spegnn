@@ -1,0 +1,17 @@
+name: spegnn
+channels:
+- pytorch
+- defaults
+- conda-forge
+dependencies:
+- python=3.8.1
+- pytorch=1.10.0
+- torchvision=0.11.1
+# - cudatoolkit>=10.1
+- numpy>=1.18.1
+- scipy>=1.4.1
+# - pandas>=1.0.1
+- imageio>=2.6.1
+- scikit-image
+- tqdm 
+# - tensorboard>=2.1.0
