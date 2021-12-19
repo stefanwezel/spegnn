@@ -11,9 +11,12 @@ from skimage.util import img_as_float
 from skimage.future import graph
 from skimage.measure import regionprops
 from skimage.color import label2rgb
+from skimage import io
+from scipy.spatial import distance
+
 from tqdm import tqdm
 from matplotlib.patches import Circle
-
+from PIL import Image
 # from egnn_clean import E_GCL, EGNN, get_edges_batch
 
 
@@ -60,6 +63,29 @@ def plot_line(ax, center, slope, length=1):
 
 
 
+def get_neighbors(node, edges):
+    # print(node)
+    # print(edges)
+
+    return list(set([edge[1] for edge in edges if edge[0]==node] + [edge[0] for edge in edges if edge[1]==node]))
+
+
+def get_highest_contrast_neighbor(g, node, neighbors):
+    
+    c1 = g.nodes[node]['mean color']
+    highest_contrast_neighbor = None
+    highest_contrast = -np.inf
+    for neighbor in neighbors:
+
+        c2 = g.nodes[neighbor]['mean color']
+        dist = distance.euclidean(c1, c2)
+        if dist >= highest_contrast:
+            highest_contrast_neighbor = neighbor
+            highest_contrast = dist                    
+    return highest_contrast_neighbor
+
+
+
 
 class SuperpixelDataset(torch.utils.data.Dataset):
     """Invariant dataset."""
@@ -75,22 +101,75 @@ class SuperpixelDataset(torch.utils.data.Dataset):
 
     def __getitem__(self, idx):
         img,target = self.orig_dataset[idx]
+        # x.unsqueeze_(0)
+        # img = data[s,0,:,:].numpy()
+        # print(img.shape)
+
+        # print(img.min())
+
+        img_rgb = np.zeros((28,28,3))
+        img_rgb[:,:,2] = img
+        img_rgb[:,:,1] = img
+        img_rgb[:,:,0] = img
+
+        # print(img_rgb[:,:,0] == img_rgb[:,:,1])
+        # print(img_rgb.shape)
+
+
         img = np.float32(np.asarray(img[0,:,:]))/255
-        labels = slic(img, n_segments=25, compactness=0.5, sigma=0.1, start_label=0)
+        # img_rgb = Image.fromarray(img.astype(int), 'RGB')
+        # print(img_rgb.size)
+        # print(img.shape)
+        # img_rgb = torch.from_numpy(img).unsqueeze(0)
+        # img_rgb = img_rgb.repeat(3, 1, 1)
+        # img_rgb = img_rgb.reshape(28,28,3)
+        # print(img_rgb.size())
+
+        labels = slic(img_rgb, n_segments = 15, sigma = 0.1, start_label=0)
+
+
+
         p = regionprops(labels+1,intensity_image=img)
         g = graph.rag_mean_color(img, labels)
+        # print(g)
+        # print(g.nodes[0].keys())
+        # print(g.nodes[0]['labels'][0])
+        # print(g.edges)
+        # print(get_neighbors(g.nodes[0]['labels'][0], g.edges))
+        # print(g.neighbors(5))
+        # print(dir(g))
+
         feats = []
         coords = []
+     
+
         for node in g.nodes:
+            neighbors = get_neighbors(node, g.edges)
+            highest_contrast_neighbor = get_highest_contrast_neighbor(g, node, neighbors)
+            print(highest_contrast_neighbor)
+            print()
+
+            
             color = p[node]['mean_intensity']
+            # print(dir(g.neighbors(node)))
+            # print(color)
             orientation = p[node].orientation#['orientation']
             # print(orientation)
             invariants = p[node]['moments_hu']
+
+            # print(p[node]['weighted_moments_hu'])
+            # print(dir(p[node]))
             center = torch.Tensor(p[node]['centroid']).unsqueeze(0)
             feat = torch.cat([torch.Tensor([color]),torch.Tensor(invariants)]).unsqueeze(0)
             feats.append(feat)
             coords.append(center)
 
+
+            # print(dir(p[node]))
+
+        # print(g)
+        # print(p)
+        # print()
 
         locations = []
         orientations = []
@@ -99,6 +178,9 @@ class SuperpixelDataset(torch.utils.data.Dataset):
         for edge in list(g.edges)[:self.num_edges]: # 'cropping'
             node1 = edge[0]
             node2 = edge[1]
+
+
+            # print(p[node1]['mean_intensity'])
 
             node1_loc = p[node1].centroid
             node2_loc = p[node2].centroid
@@ -123,7 +205,7 @@ class SuperpixelDataset(torch.utils.data.Dataset):
         feats = torch.cat(feats,dim=0)
         coords = torch.cat(coords,dim=0)
 
-        return dict(img=img, locations=locations, orientations=orientations, target=target, labels=labels)
+        return dict(img=img, locations=locations, orientations=orientations, target=target, labels=labels, img_rgb=img_rgb)
 
 
 
@@ -147,27 +229,52 @@ mnist_test = SuperpixelDataset(datasets.MNIST('data', train=False, download=True
 
 
 
-trainloader = torch.utils.data.DataLoader(mnist_train, batch_size=10, shuffle=True)
+trainloader = torch.utils.data.DataLoader(mnist_train, batch_size=1, shuffle=True)
 
 
 sample = next(iter(trainloader))
-fig, ax = plt.subplots(2)
-
-ax[0].imshow(sample['img'][0], cmap='Blues_r')
-
-for i in range(sample['locations'][0].size(0)):
-    loc = sample['locations'][0][i]
-    orientation = sample['orientations'][0][i]
-    circ = Circle(loc, 0.3, color='red')
-    slope = np.tan(orientation.numpy())
-
-    plot_line(ax[0], loc, slope)
-    ax[0].add_patch(circ)
 
 
 
 
-# segments = slic(sample['img'][0], n_segments=25, compactness=0.5, sigma=0.1, start_label=1)
+
+
+
+# image = sample['img_rgb'][0]
+# backtorgb = cv2.cvtColor(image,cv2.COLOR_GRAY2RGB)
+# img_rgb = np.zeros((img.shape[0], img.shape[1], 3))
+# for d in range(3):
+#     img_rgb[:,:,d] = img
+# print(img_rgb.shape)
+# fig, ax = plt.subplots(2)
+# image = img_as_float(io.imread('/home/stefan/Downloads/mnist_2_small.png'))[:,:,:3]
+# image = cv2.imread('image.png')
+# segments = slic(image, n_segments = 15, sigma = 0.1, start_label=0)
+# plt.imshow(sample['img'][0])
+# print(segments==sample['labels'][0].numpy())
+# print()
+
+
+
+# plt.imshow(mark_boundaries(sample['img_rgb'][0], sample['labels'][0].numpy()))
+# plt.show()
+
+# plt.imshow(mark_boundaries(sample['img'][0], sample['labels'][0].numpy()), alpha=0.3)
+# ax[0].imshow(sample['img'][0], cmap='Blues_r')
+
+# for i in range(sample['locations'][0].size(0)):
+#     loc = sample['locations'][0][i]
+#     orientation = sample['orientations'][0][i]
+#     circ = Circle(loc, 0.3, color='red')
+#     slope = np.tan(orientation.numpy())
+
+#     plot_line(ax[0], loc, slope)
+#     ax[0].add_patch(circ)
+
+
 # ax[0].imshow(mark_boundaries(sample['img'][0], sample['labels'][0].numpy()))
-# ax[0].imshow(mark_boundaries(sample['img'][0], segments))
-plt.show()
+
+
+# # segments = slic(sample['img'][0], n_segments=25, compactness=0.5, sigma=0.1, start_label=1)
+# # ax[0].imshow(mark_boundaries(sample['img'][0], segments))
+# plt.show()

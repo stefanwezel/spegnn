@@ -13,5 +13,6 @@ dependencies:
 # - pandas>=1.0.1
 - imageio>=2.6.1
 - scikit-image
-- tqdm 
+- tqdm
+- opencv
 # - tensorboard>=2.1.0
