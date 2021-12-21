@@ -1,3 +1,4 @@
+""" Author: Victor Garcia Satorras - see https://github.com/vgsatorras/egnn for original implementation. """
 from torch import nn
 import torch
 
