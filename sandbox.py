@@ -201,32 +201,79 @@ sample = next(iter(trainloader))
 
 
 
-egnn = EGNN(in_node_nf=1, hidden_nf=32, out_node_nf=1, in_edge_nf=1)
+egnn = EGNN(in_node_nf=1, hidden_nf=32, out_node_nf=10, in_edge_nf=1)
 # # Dummy parameters
 batch_size = 10
 n_nodes = sample['edges'][0][1].size(0)
 n_feat = 1
 x_dim = 2
 
-# # Dummy variables h, x and fully connected edges
-# h := node embeddings
-h = torch.ones(batch_size *  n_nodes, n_feat)
-# x := coordinate embeddings
-x = torch.ones(batch_size * n_nodes, x_dim)
-
+# # # Dummy variables h, x and fully connected edges
+# # h := node embeddings
+# h = torch.ones(batch_size *  n_nodes, n_feat)
+# # x := coordinate embeddings
+# x = torch.ones(batch_size * n_nodes, x_dim)
 
 # fake edges, edge_attributes
 edges, edge_attr = get_edges_batch(n_nodes, batch_size)
 edges = [sample['edges'][0].flatten(),sample['edges'][1].flatten()]
 
-
 # reduce size of fake edge attributes so it matches real edges
 edge_attr = edge_attr[:edges[0].size(0)]
 
-# # Run EGNN
-h, x = egnn(h, x, edges, edge_attr)
+
+loss_function = torch.nn.CrossEntropyLoss()
+optimizer = torch.optim.Adam(egnn.parameters(),lr=1e-2)
 
 
+
+pbar = tqdm(total=len(trainloader),position=0, leave=True)
+
+for batch_idx, sample in enumerate(trainloader):
+    x = sample['locations'].view(-1,2)
+    h = sample['orientations'].view(-1,1)
+    # n_nodes = 
+    edges, edge_attr = get_edges_batch(sample['edges'][0][1].size(0), batch_size)
+    
+    edges = [sample['edges'][0].flatten(),sample['edges'][1].flatten()]
+    edge_attr = edge_attr[:edges[0].size(0)]
+
+    # print(x.size())
+    # print(edges[0].size())
+    out_h, out_x = egnn(h, x, edges, edge_attr)
+    # print(out_h.size())
+        #     scores = out_feats.view(batch_size,n_nodes,-1).mean(1)
+    scores = out_h.view(batch_size, sample['edges'][0][1].size(0), -1).mean(1)#.mean(1)
+    # print(scores.size())
+    target = torch.Tensor(sample['target']).long()
+    loss = loss_function(scores, target)
+    optimizer.zero_grad()
+    loss.backward()
+    optimizer.step()
+    pbar.set_description("Training loss: %f, Class: %f" % (loss.item(),(scores.max(1)[1]==target).float().mean().item() ) )
+    pbar.update()
+pbar.close()
+
+    # print(loss.item())
+    # print(out_x.size())
+    # print()
+# print(h.view(-1,2).size())
+# print(x.view(-1,1).size())
+# Run EGNN
+# h, x = egnn(h, x, edges, edge_attr)
+# out_feats,out_coords=net(feats, coords, edges, edge_attr=None)
+
+# for epoch in range(1):
+#     for batch_idx, sample in enumerate(trainloader):
+
+#         edges = [sample['edges'][0].flatten(),sample['edges'][1].flatten()]
+#         edges, edge_attr = get_edges_batch(n_nodes, batch_size)
+
+#         x = sample['locations'].view(-1,2)
+#         h = sample['orientations'].view(-1,1)
+#         edges, edge_attr = get_edges_batch(n_nodes, batch_size)
+
+#         h, x = egnn(h, x, edges, edge_attr)
 
 
 
