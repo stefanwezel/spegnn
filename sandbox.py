@@ -123,7 +123,8 @@ class SuperpixelDataset(torch.utils.data.Dataset):
         img_rgb[:,:,0] = img
 
         img = np.float32(np.asarray(img[0,:,:]))/255
-        labels = slic(img_rgb, n_segments = 15, sigma = 0.1, start_label=0)
+        # labels = slic(img_rgb, n_segments = 15, sigma = 0.1, start_label=0)
+        labels = slic(img_rgb, n_segments = 30, sigma = 0.1, start_label=0)
         p = regionprops(labels+1,intensity_image=img)
         g = graph.rag_mean_color(img, labels)
 
@@ -180,110 +181,134 @@ class SuperpixelDataset(torch.utils.data.Dataset):
 
 
 
-total_transform = transforms.Compose([
-                #RandomReduceScale(0.3,1),
-                #RandomRotate(-180,180),
-                transforms.ToTensor()])
-total_transform_test = transforms.Compose([
-                #RandomReduceScale(0.3,1),
-                #RandomRotate(-180,180),
-                transforms.ToTensor()])
+
+
+def train_single_epoch(model, dataloader, testloader, optimizer, loss_function):
+    model.train()
+    pbar = tqdm(total=len(trainloader),position=0, leave=True)
+
+    for batch_idx, sample in enumerate(trainloader):
+        x = sample['locations'].view(-1,2)
+        h = sample['orientations'].view(-1,1)
+        edges, edge_attr = get_edges_batch(sample['edges'][0][1].size(0), batch_size)
+        
+        edges = [sample['edges'][0].flatten(),sample['edges'][1].flatten()]
+        edge_attr = edge_attr[:edges[0].size(0)]
+
+        out_h, out_x = model(h, x, edges, edge_attr)
+        scores = out_h.view(batch_size, sample['edges'][0][1].size(0), -1).mean(1)#.mean(1)
+        target = torch.Tensor(sample['target']).long()
+        loss = loss_function(scores, target)
+        
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+        
+
+        pbar.set_description(f"Training loss: {loss.item():.2f}, Accuracy: {(scores.max(1)[1]==target).float().mean().item():.2f}")# % (loss.item(),( ) )
+        pbar.update()
+    pbar.close()
+    accuracy = evaluate(model, testloader)
+
+    optimizer.param_groups[0]['lr'] *= 0.5
+
+    return accuracy
+
+
+def evaluate(model, testloader):
+    model.eval()
+    with torch.no_grad():
+        total_correct = 0
+        for batch_idx, sample in enumerate(testloader):
+            x = sample['locations'].view(-1,2)
+            h = sample['orientations'].view(-1,1)
+            edges, edge_attr = get_edges_batch(sample['edges'][0][1].size(0), 10)
+            
+            edges = [sample['edges'][0].flatten(),sample['edges'][1].flatten()]
+            edge_attr = edge_attr[:edges[0].size(0)]
+
+            out_h, out_x = model(h, x, edges, edge_attr)
+            scores = out_h.view(10, sample['edges'][0][1].size(0), -1).mean(1)#.mean(1)
+            target = torch.Tensor(sample['target']).long()
+            # loss = loss_function(scores, target)
+
+            _, predicted = torch.max(scores.data, 1)
+            total_correct += (predicted == target).sum().item() / 10
+
+        accuracy = (100 * total_correct) / len(testloader)
+        return accuracy
+
+
+if __name__ == '__main__':
+    total_transform = transforms.Compose([
+                    #RandomReduceScale(0.3,1),
+                    #RandomRotate(-180,180),
+                    transforms.ToTensor()])
+    total_transform_test = transforms.Compose([
+                    #RandomReduceScale(0.3,1),
+                    #RandomRotate(-180,180),
+                    transforms.ToTensor()])
 
 
 
 
-mnist_train = SuperpixelDataset(datasets.MNIST('data', train=True, download=True,transform=total_transform))
-mnist_test = SuperpixelDataset(datasets.MNIST('data', train=False, download=True,transform=total_transform_test))
+    mnist_train = SuperpixelDataset(datasets.MNIST('data', train=True, download=True,transform=total_transform))
+    mnist_test = SuperpixelDataset(datasets.MNIST('data', train=False, download=True,transform=total_transform_test))
 
 
-trainloader = torch.utils.data.DataLoader(mnist_train, batch_size=10, shuffle=True, collate_fn=collate_edges)
-sample = next(iter(trainloader))
-
-
-
-egnn = EGNN(in_node_nf=1, hidden_nf=32, out_node_nf=10, in_edge_nf=1)
-# # Dummy parameters
-batch_size = 10
-n_nodes = sample['edges'][0][1].size(0)
-n_feat = 1
-x_dim = 2
-
-# # # Dummy variables h, x and fully connected edges
-# # h := node embeddings
-# h = torch.ones(batch_size *  n_nodes, n_feat)
-# # x := coordinate embeddings
-# x = torch.ones(batch_size * n_nodes, x_dim)
-
-# fake edges, edge_attributes
-edges, edge_attr = get_edges_batch(n_nodes, batch_size)
-edges = [sample['edges'][0].flatten(),sample['edges'][1].flatten()]
-
-# reduce size of fake edge attributes so it matches real edges
-edge_attr = edge_attr[:edges[0].size(0)]
-
-
-loss_function = torch.nn.CrossEntropyLoss()
-optimizer = torch.optim.Adam(egnn.parameters(),lr=1e-2)
+    trainloader = torch.utils.data.DataLoader(mnist_train, batch_size=100, shuffle=True, collate_fn=collate_edges)
+    testloader = torch.utils.data.DataLoader(mnist_test, batch_size=10, shuffle=True, collate_fn=collate_edges)
 
 
 
-pbar = tqdm(total=len(trainloader),position=0, leave=True)
+    sample = next(iter(trainloader))
 
-for batch_idx, sample in enumerate(trainloader):
-    x = sample['locations'].view(-1,2)
-    h = sample['orientations'].view(-1,1)
-    # n_nodes = 
-    edges, edge_attr = get_edges_batch(sample['edges'][0][1].size(0), batch_size)
-    
+
+
+    model = EGNN(in_node_nf=1, hidden_nf=32, out_node_nf=10, in_edge_nf=1)
+    # # Dummy parameters
+    batch_size = 100
+    n_nodes = sample['edges'][0][1].size(0)
+    n_feat = 1
+    x_dim = 2
+
+
+    # fake edges, edge_attributes
+    edges, edge_attr = get_edges_batch(n_nodes, batch_size)
     edges = [sample['edges'][0].flatten(),sample['edges'][1].flatten()]
+
+    # reduce size of fake edge attributes so it matches real edges
     edge_attr = edge_attr[:edges[0].size(0)]
 
-    # print(x.size())
-    # print(edges[0].size())
-    out_h, out_x = egnn(h, x, edges, edge_attr)
-    # print(out_h.size())
-        #     scores = out_feats.view(batch_size,n_nodes,-1).mean(1)
-    scores = out_h.view(batch_size, sample['edges'][0][1].size(0), -1).mean(1)#.mean(1)
-    # print(scores.size())
-    target = torch.Tensor(sample['target']).long()
-    loss = loss_function(scores, target)
-    optimizer.zero_grad()
-    loss.backward()
-    optimizer.step()
-    pbar.set_description("Training loss: %f, Class: %f" % (loss.item(),(scores.max(1)[1]==target).float().mean().item() ) )
-    pbar.update()
-pbar.close()
 
-    # print(loss.item())
-    # print(out_x.size())
-    # print()
-# print(h.view(-1,2).size())
-# print(x.view(-1,1).size())
-# Run EGNN
-# h, x = egnn(h, x, edges, edge_attr)
-# out_feats,out_coords=net(feats, coords, edges, edge_attr=None)
-
-# for epoch in range(1):
-#     for batch_idx, sample in enumerate(trainloader):
-
-#         edges = [sample['edges'][0].flatten(),sample['edges'][1].flatten()]
-#         edges, edge_attr = get_edges_batch(n_nodes, batch_size)
-
-#         x = sample['locations'].view(-1,2)
-#         h = sample['orientations'].view(-1,1)
-#         edges, edge_attr = get_edges_batch(n_nodes, batch_size)
-
-#         h, x = egnn(h, x, edges, edge_attr)
+    loss_function = torch.nn.CrossEntropyLoss()
+    optimizer = torch.optim.Adam(model.parameters(),lr=1e-2)
+    # optimizer = torch.optim.SGD(model.parameters(),lr=1e-4)
 
 
 
-# fig, ax = plt.subplots()
-# ax.imshow(mark_boundaries(sample['img'][0], sample['segments'][0]))
-# for i in range(sample['locations'][0].size(0)):
-#     loc = sample['locations'][0][i]
-#     orientation = sample['orientations'][0][i]
-#     circ = Circle(loc, 0.3, color='red')
-#     slope = np.tan(orientation.numpy())
-#     plot_line(ax, loc, slope)
-#     ax.add_patch(circ)
-# plt.show()
+
+    # print(model)
+    for epoch in range(3):
+        epoch_accuracy = train_single_epoch(model, trainloader, testloader, optimizer, loss_function)
+        print(f"Accuracy after epoch {epoch}: {epoch_accuracy:.2f}")
+
+
+
+
+    # # Run EGNN
+    # h, x = egnn(h, x, edges, edge_attr)
+    # out_feats,out_coords=net(feats, coords, edges, edge_attr=None)
+
+
+
+    # fig, ax = plt.subplots()
+    # ax.imshow(mark_boundaries(sample['img'][0], sample['segments'][0]))
+    # for i in range(sample['locations'][0].size(0)):
+    #     loc = sample['locations'][0][i]
+    #     orientation = sample['orientations'][0][i]
+    #     circ = Circle(loc, 0.3, color='red')
+    #     slope = np.tan(orientation.numpy())
+    #     plot_line(ax, loc, slope)
+    #     ax.add_patch(circ)
+    # plt.show()
