@@ -2,7 +2,7 @@ import numpy as np
 import torch
 from torchvision import datasets, transforms
 from types import SimpleNamespace
-
+import pandas as pd
 import matplotlib.pyplot as plt
 from skimage.data import astronaut
 from skimage.segmentation import slic
@@ -32,12 +32,14 @@ def collate_edges(batch):
     batch_orientations = [b['orientations'] for b in batch]
     batch_targets = [b['target'] for b in batch]
     batch_segments = [b['segments'] for b in batch]
+    # ###############################################
+    node_centers=[b['node_centers'] for b in batch]
 
     batch_edges_rows = torch.nn.utils.rnn.pad_sequence(batch_edges_rows, batch_first=True)
     batch_edges_columns = torch.nn.utils.rnn.pad_sequence(batch_edges_columns, batch_first=True)
     batch_locations = torch.nn.utils.rnn.pad_sequence(batch_locations,batch_first=True)
     batch_orientations = torch.nn.utils.rnn.pad_sequence(batch_orientations,batch_first=True)
-
+    node_centers = torch.nn.utils.rnn.pad_sequence(node_centers, batch_first=True)
     return dict(
                 img=batch_imgs,
                 edges=[batch_edges_rows, batch_edges_columns],
@@ -45,6 +47,8 @@ def collate_edges(batch):
                 orientations=batch_orientations,
                 target=batch_targets,
                 segments=batch_segments,
+                ########################
+                node_centers=node_centers
         )
 
 
@@ -123,10 +127,11 @@ class SuperpixelDataset(torch.utils.data.Dataset):
         img_rgb[:,:,0] = img
 
         img = np.float32(np.asarray(img[0,:,:]))/255
-        # labels = slic(img_rgb, n_segments = 15, sigma = 0.1, start_label=0)
-        labels = slic(img_rgb, n_segments = 30, sigma = 0.1, start_label=0)
+        labels = slic(img_rgb, n_segments = 10, sigma = 0.1, start_label=0)
+        # labels = slic(img_rgb, n_segments = 30, sigma = 0.1, start_label=0)
         p = regionprops(labels+1,intensity_image=img)
-        g = graph.rag_mean_color(img, labels)
+        g = graph.rag_mean_color(img_rgb, labels)
+        # g = graph.rag_mean_color(img, labels)
 
         feats = []
         coords = []
@@ -136,14 +141,23 @@ class SuperpixelDataset(torch.utils.data.Dataset):
 
         rows, columns = [], []
 
+        node_centers = []
+
+        meta_data = {}
+
+
         for node in g.nodes:
             neighbors = get_neighbors(node, g.edges)
+
+
             highest_contrast_neighbor = get_highest_contrast_neighbor(g, node, neighbors)
+
 
             rows.append(node)
             columns.append(highest_contrast_neighbor)
 
             edge_center = (np.array(p[node].centroid) + np.array(p[highest_contrast_neighbor].centroid))/2
+            edge_center = edge_center[::-1] # conform to x, y ordering
 
             edge_orientation = np.rad2deg(
                 np.arctan2(
@@ -157,10 +171,26 @@ class SuperpixelDataset(torch.utils.data.Dataset):
             color = p[node]['mean_intensity']
             orientation = p[node].orientation
             invariants = p[node]['moments_hu']
-            center = torch.Tensor(p[node]['centroid']).unsqueeze(0)
+
+
+            center = torch.Tensor(p[node]['centroid'][::-1]).unsqueeze(0)
             feat = torch.cat([torch.Tensor([color]),torch.Tensor(invariants)]).unsqueeze(0)
             feats.append(feat)
             coords.append(center)
+
+
+            node_centers.append(center)
+
+
+
+            meta_data[str(node)] = dict(
+                center=center,
+                color=color,
+                invariants=invariants,
+                highest_contrast_neighbor=highest_contrast_neighbor,
+                )
+            # node_centers.append(p[node].centroid)
+
 
         edges = torch.stack((torch.LongTensor(rows), torch.LongTensor(columns)))
         edge_locations = torch.stack(edge_locations, dim=0)
@@ -168,6 +198,7 @@ class SuperpixelDataset(torch.utils.data.Dataset):
 
         feats = torch.cat(feats,dim=0)
         coords = torch.cat(coords,dim=0)
+        node_centers = torch.cat(node_centers,dim=0)
 
         return dict(
             img_rgb=img_rgb,
@@ -176,6 +207,9 @@ class SuperpixelDataset(torch.utils.data.Dataset):
             orientations=edge_orientations,
             target=target,
             segments=labels,
+            meta_data=pd.DataFrame.from_dict(meta_data, orient='index'),
+            ##########
+            node_centers=node_centers
             )
 
 
@@ -262,53 +296,63 @@ if __name__ == '__main__':
 
 
     sample = next(iter(trainloader))
+    print(sample.keys())
 
 
 
-    model = EGNN(in_node_nf=1, hidden_nf=32, out_node_nf=10, in_edge_nf=1)
-    # # Dummy parameters
-    batch_size = 100
-    n_nodes = sample['edges'][0][1].size(0)
-    n_feat = 1
-    x_dim = 2
+    # model = EGNN(in_node_nf=1, hidden_nf=32, out_node_nf=10, in_edge_nf=1)
+    # # # Dummy parameters
+    # batch_size = 100
+    # n_nodes = sample['edges'][0][1].size(0)
+    # n_feat = 1
+    # x_dim = 2
 
 
-    # fake edges, edge_attributes
-    edges, edge_attr = get_edges_batch(n_nodes, batch_size)
-    edges = [sample['edges'][0].flatten(),sample['edges'][1].flatten()]
+    # # fake edges, edge_attributes
+    # edges, edge_attr = get_edges_batch(n_nodes, batch_size)
+    # edges = [sample['edges'][0].flatten(),sample['edges'][1].flatten()]
 
-    # reduce size of fake edge attributes so it matches real edges
-    edge_attr = edge_attr[:edges[0].size(0)]
-
-
-    loss_function = torch.nn.CrossEntropyLoss()
-    optimizer = torch.optim.Adam(model.parameters(),lr=1e-2)
-    # optimizer = torch.optim.SGD(model.parameters(),lr=1e-4)
+    # # reduce size of fake edge attributes so it matches real edges
+    # edge_attr = edge_attr[:edges[0].size(0)]
 
 
-
-
-    # print(model)
-    for epoch in range(3):
-        epoch_accuracy = train_single_epoch(model, trainloader, testloader, optimizer, loss_function)
-        print(f"Accuracy after epoch {epoch}: {epoch_accuracy:.2f}")
+    # loss_function = torch.nn.CrossEntropyLoss()
+    # optimizer = torch.optim.Adam(model.parameters(),lr=1e-2)
+    # # optimizer = torch.optim.SGD(model.parameters(),lr=1e-4)
 
 
 
 
-    # # Run EGNN
-    # h, x = egnn(h, x, edges, edge_attr)
-    # out_feats,out_coords=net(feats, coords, edges, edge_attr=None)
+    # # print(model)
+    # for epoch in range(3):
+    #     epoch_accuracy = train_single_epoch(model, trainloader, testloader, optimizer, loss_function)
+    #     print(f"Accuracy after epoch {epoch}: {epoch_accuracy:.2f}")
 
 
 
-    # fig, ax = plt.subplots()
-    # ax.imshow(mark_boundaries(sample['img'][0], sample['segments'][0]))
-    # for i in range(sample['locations'][0].size(0)):
-    #     loc = sample['locations'][0][i]
-    #     orientation = sample['orientations'][0][i]
-    #     circ = Circle(loc, 0.3, color='red')
-    #     slope = np.tan(orientation.numpy())
-    #     plot_line(ax, loc, slope)
-    #     ax.add_patch(circ)
-    # plt.show()
+
+    # # # Run EGNN
+    # # h, x = egnn(h, x, edges, edge_attr)
+    # # out_feats,out_coords=net(feats, coords, edges, edge_attr=None)
+
+
+    fig, ax = plt.subplots()
+    ax.imshow(mark_boundaries(sample['img'][0], sample['segments'][0]))
+    for i in range(len(sample['node_centers'][0])):
+        loc = sample['node_centers'][0][i].cpu().numpy()
+        circ = Circle(loc, 0.3, color='red')
+        # y, x = loc
+        # print(x)
+        # print(y)
+        # print()
+        # circ = Circle((x,y), 0.3, color='red')
+        ax.add_patch(circ)
+
+    for i in range(sample['locations'][0].size(0)):
+        loc = sample['locations'][0][i]
+        # orientation = sample['orientations'][0][i]
+        circ = Circle(loc, 0.3, color='green')
+        # slope = np.tan(orientation.numpy())
+        # plot_line(ax, loc, slope)
+        ax.add_patch(circ)
+    plt.show()

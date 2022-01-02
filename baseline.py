@@ -44,6 +44,14 @@ class SuperpixelDataset(torch.utils.data.Dataset):
 
     def __getitem__(self, idx):
         img,target = self.orig_dataset[idx]
+
+        # 'convert' to rgb
+        img_rgb = np.zeros((28,28,3))
+        img_rgb[:,:,2] = img
+        img_rgb[:,:,1] = img
+        img_rgb[:,:,0] = img
+        img = img_rgb
+
         img = np.float32(np.asarray(img[0,:,:]))/255
         labels = slic(img, n_segments=25, compactness=0.5, sigma=0.1)
         p = regionprops(labels+1,intensity_image=img)
@@ -60,7 +68,7 @@ class SuperpixelDataset(torch.utils.data.Dataset):
         feats = torch.cat(feats,dim=0)
         coords = torch.cat(coords,dim=0)
         # print(feats.size())
-        return (feats,coords,target)
+        return (feats,coords,target, img)
 
 args = SimpleNamespace()
 args.no_cuda = False
@@ -137,7 +145,7 @@ for epoch in range(1):
         pbar.set_description("Training loss: %f, Class: %f" % (loss.item(),(scores.max(1)[1]==target).float().mean().item() ) )
         pbar.update()
     pbar.close()
-    # optimizer.param_groups[0]['lr'] *= 0.5
+    optimizer.param_groups[0]['lr'] *= 0.5
     # Validation
     #net.eval()
     #pbar = tqdm(test_loader,position=0, leave=True)
