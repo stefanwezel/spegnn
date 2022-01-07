@@ -174,6 +174,7 @@ def get_edges(n_nodes):
                 cols.append(j)
 
     edges = [rows, cols]
+    # print(edges)
     return edges
 
 
@@ -189,13 +190,14 @@ def get_edges_batch(n_nodes, batch_size):
             rows.append(edges[0] + n_nodes * i)
             cols.append(edges[1] + n_nodes * i)
         edges = [torch.cat(rows), torch.cat(cols)]
+    # print(edges)
     return edges, edge_attr
 
 
 if __name__ == "__main__":
     # Dummy parameters
     batch_size = 8
-    n_nodes = 4
+    n_nodes = 3
     n_feat = 1
     x_dim = 3
 
@@ -204,9 +206,20 @@ if __name__ == "__main__":
     x = torch.ones(batch_size * n_nodes, x_dim)
     edges, edge_attr = get_edges_batch(n_nodes, batch_size)
 
+    # print(edges[0])
+    # print(edges[1].size())
     # Initialize EGNN
-    egnn = EGNN(in_node_nf=n_feat, hidden_nf=32, out_node_nf=1, in_edge_nf=1)
+    egnn = EGNN(in_node_nf=n_feat, hidden_nf=32, out_node_nf=1, in_edge_nf=0,)
+    # net = EGNN(
+    #     in_node_nf=n_feat,
+    #     hidden_nf=100,
+    #     out_node_nf=10,
+    #     in_edge_nf=0,
+    #     attention=True,
+    #     normalize=True,
+    #     n_layers=6,
+    #     )
 
     # Run EGNN
-    h, x = egnn(h, x, edges, edge_attr)
+    h, x = egnn(h, x, edges, edge_attr=None)
 

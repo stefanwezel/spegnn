@@ -68,7 +68,7 @@ class SuperpixelDataset(torch.utils.data.Dataset):
         feats = torch.cat(feats,dim=0)
         coords = torch.cat(coords,dim=0)
         # print(feats.size())
-        return (feats,coords,target, img)
+        return (feats,coords,target)
 
 args = SimpleNamespace()
 args.no_cuda = False
@@ -119,34 +119,56 @@ batch_feats, batch_coords, target, edges,n_nodes,batch_size = next(iter(train_lo
 # print(edges[0].size())
 # print(batch_feats.size())
 # print(batch_coords.size())
+net = EGNN(
+    in_node_nf=n_feat,
+    hidden_nf=100,
+    out_node_nf=10,
+    in_edge_nf=0,
+    attention=True,
+    normalize=True,
+    n_layers=6,
+)
 
+
+# print(n_feat)
+feats, coords, target, edges,n_nodes,batch_size = next(iter(train_loader))
+# print(feats.dtype)
+
+# print(feats.size())
+# print(coords.size())
+
+out_feats,out_coords=net(feats, coords, edges, edge_attr=None)
+# print(out_feats.size())
+scores = out_feats.view(batch_size,n_nodes,-1).mean(1)
+print(scores.size())
 # print(batch_size)
+# print(len(edges))
+# print(edges[0].size())
+# for epoch in range(1):
+#     pbar = tqdm(total=len(train_loader),position=0, leave=True)
+#     for batch_idx, (batch_feats, batch_coords, target, edges,n_nodes,batch_size) in enumerate(train_loader):
+#         # print(edges[1].size())
 
-for epoch in range(1):
-    pbar = tqdm(total=len(train_loader),position=0, leave=True)
-    for batch_idx, (batch_feats, batch_coords, target, edges,n_nodes,batch_size) in enumerate(train_loader):
-        # print(edges[1].size())
-
-        for e in range(len(edges)):
-            edges[e] = edges[e].to(device)
-        #edge_attr = edge_attr.to(device)
-        feats, coords, target = batch_feats.to(device), batch_coords.to(device), target.to(device)
-        # print(feats.size())
-        out_feats,out_coords=net(feats, coords, edges, edge_attr=None)
-        # print(out_feats.size())
-        scores = out_feats.view(batch_size,n_nodes,-1).mean(1)
-        # print(scores.size())
-        # print(batch_size)
-        # print()
-        loss = loss_function(scores,target)
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-        pbar.set_description("Training loss: %f, Class: %f" % (loss.item(),(scores.max(1)[1]==target).float().mean().item() ) )
-        pbar.update()
-    pbar.close()
-    optimizer.param_groups[0]['lr'] *= 0.5
-    # Validation
-    #net.eval()
-    #pbar = tqdm(test_loader,position=0, leave=True)
-    #for batch_idx, (data, target) in enumerate(test_loader):
+#         for e in range(len(edges)):
+#             edges[e] = edges[e].to(device)
+#         #edge_attr = edge_attr.to(device)
+#         feats, coords, target = batch_feats.to(device), batch_coords.to(device), target.to(device)
+#         # print(feats.size())
+#         out_feats,out_coords=net(feats, coords, edges, edge_attr=None)
+#         # print(out_feats.size())
+#         scores = out_feats.view(batch_size,n_nodes,-1).mean(1)
+#         # print(scores.size())
+#         # print(batch_size)
+#         # print()
+#         loss = loss_function(scores,target)
+#         optimizer.zero_grad()
+#         loss.backward()
+#         optimizer.step()
+#         pbar.set_description("Training loss: %f, Class: %f" % (loss.item(),(scores.max(1)[1]==target).float().mean().item() ) )
+#         pbar.update()
+#     pbar.close()
+#     optimizer.param_groups[0]['lr'] *= 0.5
+#     # Validation
+#     #net.eval()
+#     #pbar = tqdm(test_loader,position=0, leave=True)
+#     #for batch_idx, (data, target) in enumerate(test_loader):

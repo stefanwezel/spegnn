@@ -13,10 +13,10 @@ from skimage.measure import regionprops
 from skimage.color import label2rgb
 from skimage import io
 from scipy.spatial import distance
-
 from tqdm import tqdm
 from matplotlib.patches import Circle
 from PIL import Image
+import math
 
 from models import EGNN, get_edges_batch
 
@@ -32,6 +32,7 @@ def collate_edges(batch):
     batch_orientations = [b['orientations'] for b in batch]
     batch_targets = [b['target'] for b in batch]
     batch_segments = [b['segments'] for b in batch]
+    meta_data = [b['meta_data'] for b in batch]
     # ###############################################
     node_centers=[b['node_centers'] for b in batch]
 
@@ -40,6 +41,8 @@ def collate_edges(batch):
     batch_locations = torch.nn.utils.rnn.pad_sequence(batch_locations,batch_first=True)
     batch_orientations = torch.nn.utils.rnn.pad_sequence(batch_orientations,batch_first=True)
     node_centers = torch.nn.utils.rnn.pad_sequence(node_centers, batch_first=True)
+    
+
     return dict(
                 img=batch_imgs,
                 edges=[batch_edges_rows, batch_edges_columns],
@@ -47,7 +50,79 @@ def collate_edges(batch):
                 orientations=batch_orientations,
                 target=batch_targets,
                 segments=batch_segments,
+                meta_data=meta_data,
                 ########################
+                node_centers=node_centers
+        )
+
+def collate(batch):
+    """ TODO docstring"""
+    meta_data = [d['meta_data'].loc[d['meta_data']['is_darker']==1] for d in batch]
+    batch_locations = [np.array(list(meta_datum['center_beween'])) for meta_datum in meta_data]
+    batch_angles = [meta_datum['angle_between'].to_numpy() for meta_datum in meta_data]
+    batch_nodes_dark = [meta_datum.index.astype(np.int32).to_numpy() for meta_datum in meta_data]
+    batch_nodes_bright = [meta_datum['highest_contrast_neighbor'].to_numpy() for meta_datum in meta_data]
+    batch_colors = [meta_datum['highest_contrast_neighbor_color'].to_numpy() for meta_datum in meta_data]
+    batch_invariants = [[moment for moment in meta_datum['highest_contrast_neighbor_invariants'].to_numpy()] for meta_datum in meta_data]
+
+
+    # convert and pad batch_edges
+    # batch_nodes_dark = torch.nn.utils.rnn.pad_sequence(
+    #     [torch.from_numpy(node) for node in batch_nodes_dark],
+    #     batch_first=True
+    #     )
+    # batch_nodes_bright = torch.nn.utils.rnn.pad_sequence(
+    #     [torch.from_numpy(node) for node in batch_nodes_bright],
+    #     batch_first=True
+    #     )
+
+    # batch_edges = [batch_nodes_dark, batch_nodes_bright]
+
+    # convert and pad locations
+    batch_locations = torch.nn.utils.rnn.pad_sequence(
+        [torch.from_numpy(locations) for locations in batch_locations],
+        batch_first=True
+        )
+    batch_size = batch_locations.size(0)
+
+
+
+    # concatenate orientations, colors and invariants of darker nodes to form features
+    batch_feats = []
+    for i in range(len(batch)):
+        angles = torch.from_numpy(batch_angles[i]).unsqueeze(1)
+        colors = torch.from_numpy(batch_colors[i]).unsqueeze(1)
+        invariants = torch.from_numpy(np.array(batch_invariants[i]))
+        feats = torch.cat((angles, colors, invariants), dim=-1)
+        batch_feats.append(feats)
+
+
+    # pad
+    batch_feats = torch.nn.utils.rnn.pad_sequence(batch_feats, batch_first=True).to(torch.float32)
+    
+
+    node_centers=[b['node_centers'] for b in batch]
+    node_centers = torch.nn.utils.rnn.pad_sequence(node_centers, batch_first=True).to(torch.float32)
+
+    n_nodes = batch_feats.size(1)
+    batch_size = batch_feats.size(0)
+
+
+    edges, _ = get_edges_batch(n_nodes, batch_size)
+
+    return dict(
+                # for model
+                edges=edges,
+                locations = (batch_locations.view(-1,2) / 28).to(torch.float32),
+                # feats = batch_feats.view(coords.shape[0],-1),
+                feats = batch_feats.view(-1,9).to(torch.float32),
+                target=torch.LongTensor([b['target'] for b in batch]),
+                meta_data=meta_data,
+                n_nodes = n_nodes,
+                batch_size=batch_size,
+                # for plotting
+                segments=[b['segments'] for b in batch],
+                img=[b['img_rgb'] for b in batch],
                 node_centers=node_centers
         )
 
@@ -55,7 +130,44 @@ def collate_edges(batch):
 
 
 
+def get_bearing(p1,p2):
+    lat1 = p1[1]
+    long1 = p1[0]
+    lat2 = p2[1]
+    long2 = p2[0]
+    # lat1 = p1[0]
+    # long1 = p1[1]
+    # lat2 = p2[0]
+    # long2 = p2[1]
+
+
+    dLon = (long2 - long1)
+    x = math.cos(math.radians(lat2)) * math.sin(math.radians(dLon))
+    y = math.cos(math.radians(lat1)) * math.sin(math.radians(lat2)) - math.sin(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.cos(math.radians(dLon))
+    brng = np.arctan2(x,y)
+    brng = np.degrees(brng)
+
+    return brng
+
+def slope(line):
+    # Assignments made purely for readability. One could opt to just one-line return them
+    x0 = line.coords[0][0]
+    y0 = line.coords[0][1]
+    x1 = line.coords[1][0]
+    y1 = line.coords[1][1]
+    return (y1 - y0) / (x1 - x0)
+
+
+import numpy as np
+
+def unit_vector(vector):
+    """ Returns the unit vector of the vector.  """
+    return vector / np.linalg.norm(vector)
+
+
+
 def plot_line(ax, center, slope, length=1):
+
     """ TODO """
     if slope > 30:
         slope = 30
@@ -75,7 +187,7 @@ def plot_line(ax, center, slope, length=1):
     pt1 = (center[0] - length, slope * (center[0] - length) + b)
     pt2 = (center[0] + length, slope * (center[0] + length) + b)
 
-    ax.plot((pt1[0], center[0]), (pt1[1], center[1]), color='red', linewidth=0.5)
+    # ax.plot((pt1[0], center[0]), (pt1[1], center[1]), color='red', linewidth=0.5)
     ax.plot((center[0], pt2[0]), (center[1], pt2[1]), color='red', linewidth=0.5)
 
 
@@ -127,7 +239,7 @@ class SuperpixelDataset(torch.utils.data.Dataset):
         img_rgb[:,:,0] = img
 
         img = np.float32(np.asarray(img[0,:,:]))/255
-        labels = slic(img_rgb, n_segments = 10, sigma = 0.1, start_label=0)
+        labels = slic(img_rgb, n_segments = 25, compactness = 50, sigma = 0.1, start_label=0)
         # labels = slic(img_rgb, n_segments = 30, sigma = 0.1, start_label=0)
         p = regionprops(labels+1,intensity_image=img)
         g = graph.rag_mean_color(img_rgb, labels)
@@ -182,14 +294,18 @@ class SuperpixelDataset(torch.utils.data.Dataset):
             node_centers.append(center)
 
 
-
             meta_data[str(node)] = dict(
-                center=center,
+                center=p[node].centroid[::-1],
                 color=color,
                 invariants=invariants,
+                is_darker=(color <= p[highest_contrast_neighbor].mean_intensity).astype(np.int32),
                 highest_contrast_neighbor=highest_contrast_neighbor,
+                highest_contrast_neighbor_loc=p[highest_contrast_neighbor].centroid[::-1],
+                highest_contrast_neighbor_color=p[highest_contrast_neighbor].mean_intensity,
+                highest_contrast_neighbor_invariants=p[highest_contrast_neighbor].moments_hu,
+                angle_between=get_bearing(p[node].centroid[::-1], p[highest_contrast_neighbor].centroid[::-1]),
+                center_beween=edge_center,
                 )
-            # node_centers.append(p[node].centroid)
 
 
         edges = torch.stack((torch.LongTensor(rows), torch.LongTensor(columns)))
@@ -199,6 +315,7 @@ class SuperpixelDataset(torch.utils.data.Dataset):
         feats = torch.cat(feats,dim=0)
         coords = torch.cat(coords,dim=0)
         node_centers = torch.cat(node_centers,dim=0)
+        # print(len(edges[0]))
 
         return dict(
             img_rgb=img_rgb,
@@ -290,15 +407,91 @@ if __name__ == '__main__':
     mnist_test = SuperpixelDataset(datasets.MNIST('data', train=False, download=True,transform=total_transform_test))
 
 
-    trainloader = torch.utils.data.DataLoader(mnist_train, batch_size=100, shuffle=True, collate_fn=collate_edges)
-    testloader = torch.utils.data.DataLoader(mnist_test, batch_size=10, shuffle=True, collate_fn=collate_edges)
+    # trainloader = torch.utils.data.DataLoader(mnist_train, batch_size=100, shuffle=True, collate_fn=collate_edges)
+    # testloader = torch.utils.data.DataLoader(mnist_test, batch_size=10, shuffle=True, collate_fn=collate_edges)
+
+    trainloader = torch.utils.data.DataLoader(mnist_train, batch_size=16, shuffle=True, collate_fn=collate)
+    # testloader = torch.utils.data.DataLoader(mnist_test, batch_size=10, shuffle=True, collate_fn=collate_edges)
+
 
 
 
     sample = next(iter(trainloader))
+
     print(sample.keys())
 
+    coords = sample['locations']
+    feats = sample['feats']
+    edges = sample['edges']
+    n_nodes = sample['n_nodes']
+    batch_size = sample['batch_size']
 
+    n_feat = feats.size(1)
+
+
+    model = EGNN(
+        in_node_nf=n_feat, # 9
+        hidden_nf=100,
+        out_node_nf=10,
+        in_edge_nf=0,
+        attention=True,
+        normalize=True,
+        n_layers=6,
+    )
+
+
+    # print(feats.size())
+    # print(coords.size())
+
+
+
+    out_feats, out_coords = model(feats, coords, edges, edge_attr=None)
+
+    # print(out_feats.size())
+
+    scores = out_feats.view(batch_size,n_nodes,-1).mean(1)
+    print(scores.size())
+# (batch_feats, batch_coords, target, edges,n_nodes,batch_size)
+    # feats, coords, target = batch_feats.to(device), batch_coords.to(device), target.to(device)
+    # print(feats.size())
+    # out_feats,out_coords=net(feats, coords, edges, edge_attr=None)
+    # print(out_feats.size())
+    # print()
+    # print(sample['locations'].size())
+    # print(sample['feats'].size())
+    # print(sample['target'].size())
+    # print(sample['edges'][0].size())
+
+
+    # print(sample['edges'][0][0])
+    # print(sample['meta_data'][0][['center', 'highest_contrast_neighbor', 'highest_contrast_neighbor_loc']])
+    # print(sample['meta_data'][0][['is_darker']])
+
+
+
+    # fig, ax = plt.subplots()
+    # ax.imshow(mark_boundaries(sample['img'][0], sample['segments'][0],mode='inner'))
+    # for index, data in sample['meta_data'][0].iterrows():
+    # #     # print(row.center)
+    # #     # loc = sample['node_centers'][0][i].cpu().numpy()
+    #     node_circ = Circle(data.center, 0.3, color='red')
+    #     ax.plot(
+    #         [data.center[0], data.highest_contrast_neighbor_loc[0]],
+    #         [data.center[1], data.highest_contrast_neighbor_loc[1]],
+    #         color='blue'
+    #         )
+    #     ax.add_patch(node_circ)
+
+    #     neighbor_circ = Circle(data.center_beween, 0.3, color='green')
+    #     ax.add_patch(neighbor_circ)
+
+    # plt.show()
+
+    # # print(angle_between((1, 0), (0, 1)))
+
+
+
+    
 
     # model = EGNN(in_node_nf=1, hidden_nf=32, out_node_nf=10, in_edge_nf=1)
     # # # Dummy parameters
@@ -336,23 +529,23 @@ if __name__ == '__main__':
     # # out_feats,out_coords=net(feats, coords, edges, edge_attr=None)
 
 
-    fig, ax = plt.subplots()
-    ax.imshow(mark_boundaries(sample['img'][0], sample['segments'][0]))
-    for i in range(len(sample['node_centers'][0])):
-        loc = sample['node_centers'][0][i].cpu().numpy()
-        circ = Circle(loc, 0.3, color='red')
-        # y, x = loc
-        # print(x)
-        # print(y)
-        # print()
-        # circ = Circle((x,y), 0.3, color='red')
-        ax.add_patch(circ)
+    # fig, ax = plt.subplots()
+    # ax.imshow(mark_boundaries(sample['img'][0], sample['segments'][0],mode='inner'))
+    # for i in range(len(sample['node_centers'][0])):
+    #     loc = sample['node_centers'][0][i].cpu().numpy()
+    #     circ = Circle(loc, 0.3, color='red')
+    #     # y, x = loc
+    #     # print(x)
+    #     # print(y)
+    #     # print()
+    #     # circ = Circle((x,y), 0.3, color='red')
+    #     ax.add_patch(circ)
 
-    for i in range(sample['locations'][0].size(0)):
-        loc = sample['locations'][0][i]
-        # orientation = sample['orientations'][0][i]
-        circ = Circle(loc, 0.3, color='green')
-        # slope = np.tan(orientation.numpy())
-        # plot_line(ax, loc, slope)
-        ax.add_patch(circ)
-    plt.show()
+    # for i in range(sample['locations'][0].size(0)):
+    #     loc = sample['locations'][0][i]
+    #     # orientation = sample['orientations'][0][i]
+    #     circ = Circle(loc, 0.3, color='green')
+    #     # slope = np.tan(orientation.numpy())
+    #     # plot_line(ax, loc, slope)
+    #     ax.add_patch(circ)
+    # plt.show()
