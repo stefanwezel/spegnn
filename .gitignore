@@ -1,8 +1,10 @@
+graph_mnist/
+*.npy
 del.py
 slic.py
 # datasets
 data/*
-
+images/*
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
