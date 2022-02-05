@@ -38,7 +38,7 @@ print(sample.edge_attr.size())
 
 
 print(sample.y)
-layer = EGNN_Sparse(feats_dim=1,
+layer = EGNN_Sparse(feats_dim=10,
 			        pos_dim=2,
 
                     # edge_attr_dim=4,

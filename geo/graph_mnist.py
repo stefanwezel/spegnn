@@ -37,18 +37,37 @@ class GraphMNIST(InMemoryDataset):
 
         return edges
 
-    def pre_process(self, mask, loc, feat, target):
+
+    def preprocess_datum(self, datum_dict):
+
+        mask = datum_dict['mask']
+        loc = datum_dict['loc']
+        color = datum_dict['color']
+        sin = datum_dict['sin']
+        cos = datum_dict['cos']
+        invariant = datum_dict['invariant']
+        target = datum_dict['target']
 
         locs = []
-        feats = []
+        colors = []
+        sins = []
+        coss = []
+        invariants = []
+
         for i in range(len(mask)):
             if mask[i] == 1:
                 locs.append(loc[i])
-                feats.append(feat[i])
+                colors.append(color[i])
+                sins.append(sin[i])
+                coss.append(cos[i])
+                invariants.append(invariant[i])
 
         x = torch.cat((
             torch.tensor(np.array(locs)),
-            torch.tensor(np.array(feats)).unsqueeze(1),
+            torch.tensor(np.array(colors)).unsqueeze(1),
+            torch.tensor(np.array(sins)).unsqueeze(1),
+            torch.tensor(np.array(coss)).unsqueeze(1),
+            torch.tensor(np.array(invariants)),
             ), dim=1).float()
 
         n_nodes = x.size(0)
@@ -56,8 +75,9 @@ class GraphMNIST(InMemoryDataset):
         edges = torch.tensor(np.array(self.get_edges(n_nodes)))
         datum = Data(x, edges, y=torch.tensor(target))
 
-
         return datum
+
+
 
     def process(self):
         # load pre-processed mnist graph data (created with SLIC, see generate_graph_mnist.py)
@@ -65,10 +85,25 @@ class GraphMNIST(InMemoryDataset):
             data_dict = pickle.load(fp)
         
         # Read data into huge `Data` list.
-        data_list = [self.pre_process(t[0], t[1], t[2], t[3]) for t in zip(
+        data_list = [self.preprocess_datum(
+                dict(
+                    mask=t[0],
+                    loc=t[1],
+                    color=t[2],
+                    sin=t[3],
+                    cos=t[4],
+                    invariant=t[5],
+                    #
+                    target=t[-1],
+                    )
+                ) for t in zip(
             data_dict['is_darker'],
             data_dict['center_between'],
             data_dict['highest_contrast_neighbor_color'],
+            data_dict['sin'],
+            data_dict['cos'],
+            data_dict['invariants'],
+            # 
             data_dict['targets'],
             )]
 
@@ -83,9 +118,9 @@ class GraphMNIST(InMemoryDataset):
 if __name__ == '__main__':
     dataset = GraphMNIST('.')
 
-    train_loader = DataLoader(dataset, batch_size=1, shuffle=True)
-    datum = next(iter(train_loader))
-    print(datum.keys)
+    # train_loader = DataLoader(dataset, batch_size=1, shuffle=True)
+    # datum = next(iter(train_loader))
+    # print(datum.keys)
 
 
 
