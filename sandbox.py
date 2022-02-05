@@ -22,63 +22,6 @@ import pickle
 from models import EGNN, get_edges_batch
 from utils import get_bearing, get_highest_contrast_neighbor, get_neighbors, plot_line
 
-
-def collate(batch):
-    """ TODO docstring"""
-    meta_data = [d['meta_data'].loc[d['meta_data']['is_darker']==1] for d in batch]
-    batch_locations = [np.array(list(meta_datum['center_between'])) for meta_datum in meta_data]
-    batch_angles = [meta_datum['angle_between'].to_numpy() for meta_datum in meta_data]
-    # batch_nodes_dark = [meta_datum.index.astype(np.int32).to_numpy() for meta_datum in meta_data]
-    # batch_nodes_bright = [meta_datum['highest_contrast_neighbor'].to_numpy() for meta_datum in meta_data]
-    batch_colors = [meta_datum['highest_contrast_neighbor_color'].to_numpy() for meta_datum in meta_data]
-    batch_invariants = [[moment for moment in meta_datum['highest_contrast_neighbor_invariants'].to_numpy()] for meta_datum in meta_data]
-
-
-    # convert and pad locations
-    batch_locations = torch.nn.utils.rnn.pad_sequence(
-        [torch.from_numpy(locations) for locations in batch_locations],
-        batch_first=True
-        )
-
-    batch_size = batch_locations.size(0)
-
-    # concatenate orientations, colors and invariants of darker nodes to form features
-    batch_feats = []
-    for i in range(len(batch)):
-        angles = torch.from_numpy(batch_angles[i]).unsqueeze(1)
-        colors = torch.from_numpy(batch_colors[i]).unsqueeze(1)
-        invariants = torch.from_numpy(np.array(batch_invariants[i]))
-        feats = torch.cat((angles, colors, invariants), dim=-1)
-        batch_feats.append(feats)
-
-    # pad features
-    batch_feats = torch.nn.utils.rnn.pad_sequence(batch_feats, batch_first=True).to(torch.float32)
-    # pad 
-    # node_centers=[b['node_centers'] for b in batch]
-    # node_centers = torch.nn.utils.rnn.pad_sequence(node_centers, batch_first=True).to(torch.float32)
-
-    n_nodes = batch_feats.size(1)
-    batch_size = batch_feats.size(0)
-    # print('regular')
-    # print(n_nodes)
-    # print(batch_size)
-    edges, _ = get_edges_batch(n_nodes, batch_size)
-
-    return dict(
-                # for model
-                edges=edges,
-                locations = (batch_locations.view(-1,2) / 28).to(torch.float32),
-                feats = batch_feats.view(-1,9).to(torch.float32),
-                target=torch.LongTensor([b['target'] for b in batch]),
-                n_nodes = n_nodes,
-                batch_size=batch_size,
-                # for plotting
-                meta_data=meta_data,
-                segments=[b['segments'] for b in batch],
-                img=[b['img_rgb'] for b in batch],
-                # node_centers=node_centers
-        )
-
 def collate_graph(batch):
     """ TODO docstring"""
     # meta_data = [d['meta_data'].loc[d['meta_data']['is_darker']==1] for d in batch]
@@ -87,74 +30,49 @@ def collate_graph(batch):
     batch_sins = [np.array(datum['sins']) for datum in batch]
     batch_cossins = [np.array(datum['cossins']) for datum in batch]
     batch_colors = [np.array(datum['colors']) for datum in batch]
+    batch_highest_contrast_neighbor_colors = [np.array(datum['highest_contrast_neighbor_colors']) for datum in batch]
     batch_invariants = [np.array(datum['invariants']) for datum in batch]
     batch_targets = [datum['target'] for datum in batch]
     batch_img_paths = [datum['img_path'] for datum in batch]
-    # print(batch_targets)
-    # print(batch_locations[0].shape)
 
-    # batch_angles = [meta_datum['angle_between'].to_numpy() for meta_datum in meta_data]
-    # batch_nodes_dark = [meta_datum.index.astype(np.int32).to_numpy() for meta_datum in meta_data]
-    # batch_nodes_bright = [meta_datum['highest_contrast_neighbor'].to_numpy() for meta_datum in meta_data]
-    # batch_colors = [meta_datum['highest_contrast_neighbor_color'].to_numpy() for meta_datum in meta_data]
-    # batch_invariants = [[moment for moment in meta_datum['highest_contrast_neighbor_invariants'].to_numpy()] for meta_datum in meta_data]
-
-
-    # # convert and pad locations
+    # convert and pad locations
     batch_locations = torch.nn.utils.rnn.pad_sequence(
         [torch.from_numpy(locations) for locations in batch_locations],
         batch_first=True
         )
 
-    # batch_size = batch_locations.size(0)
-
-    # # concatenate orientations, colors and invariants of darker nodes to form features
+    # concatenate orientations, colors and invariants of darker nodes to form features
     batch_feats = []
     for i in range(len(batch)):
         angles = torch.from_numpy(batch_orientations[i]).unsqueeze(1)
         sin = torch.from_numpy(batch_sins[i]).unsqueeze(1)
         cos = torch.from_numpy(batch_cossins[i]).unsqueeze(1)
         colors = torch.from_numpy(batch_colors[i]).unsqueeze(1)
+        highest_contrast_neighbor_colors = torch.from_numpy(batch_highest_contrast_neighbor_colors[i]).unsqueeze(1)
         invariants = torch.from_numpy(np.array(batch_invariants[i]))
-        feats = torch.cat((angles, sin, cos, invariants), dim=-1)
+        feats = torch.cat((sin, cos, colors, highest_contrast_neighbor_colors, invariants), dim=-1)
         batch_feats.append(feats)
 
-    # # pad features
+    # pad features
     batch_feats = torch.nn.utils.rnn.pad_sequence(batch_feats, batch_first=True).to(torch.float32)
-    # pad 
-    # # node_centers=[b['node_centers'] for b in batch]
-    # # node_centers = torch.nn.utils.rnn.pad_sequence(node_centers, batch_first=True).to(torch.float32)
 
-
-    # print(batch_feats.size())
-
+    # obtain metadata and edges
     batch_size = batch_feats.size(0)
     n_nodes = batch_feats.size(1)
     feature_size = batch_feats.size(2)
-    # print('graph')
-    # print(n_nodes)
-    # print(batch_size)
 
     edges, _ = get_edges_batch(n_nodes, batch_size)
 
     return dict(
-                # locations=batch_locations,
                 locations = (batch_locations.view(-1,2) / 28).to(torch.float32),
+                # locations = (batch_locations.view(-1,2)).to(torch.float32),
                 feats = batch_feats.view(-1, feature_size).to(torch.float32),
                 edges = edges,
                 batch_size=batch_size,
                 n_nodes=n_nodes,
                 feature_size = feature_size,
                 img_paths=batch_img_paths,
-                # edges=edges,
                 target=torch.LongTensor([b['target'] for b in batch]),
-                # n_nodes = n_nodes,
-                # batch_size=batch_size,
-                # for plotting
-                # meta_data=meta_data,
-                # segments=[b['segments'] for b in batch],
-                # img=[b['img_rgb'] for b in batch],
-                # node_centers=node_centers
         )
 
 
@@ -162,7 +80,6 @@ class GraphMNIST(torch.utils.data.Dataset):
     def __init__(self, data_root='./graph_mnist/',is_train=True):
         self.data_root = data_root
         self.is_train = is_train
-        # dtype_lookup = dtype={'center':np.ndarray, 'color':np.ndarray, 'invariants':np.ndarray}
         if self.is_train:
             with open(data_root + 'train_data.pickle', "rb") as fp:
                 self.data_dict = pickle.load(fp)
@@ -171,31 +88,30 @@ class GraphMNIST(torch.utils.data.Dataset):
                 self.data_dict = pickle.load(fp)
 
         self.data = pd.DataFrame(self.data_dict)
-        # print(self.data.head())
 
     def __len__(self):
         return self.data.shape[0]
-        # return 100
+
     def __getitem__(self, ix):
         sample = self.data.iloc[ix]
-
+        # to prevent duplicates, mask out brighter partner of superpixel pair
         mask = sample['is_darker']
 
         locations = []
         orientations = []
         sins, cossins = [], []
         colors = []
+        highest_contrast_neighbor_colors = []
         invariants = []
 
         for i in range(len(mask)):
             if mask[i] == 1:
                 locations.append(sample['center_between'][i])
-
                 orientations.append(sample['angle_between'][i])
                 sins.append(sample['sin'][i])
                 cossins.append(sample['cos'][i])
-
                 colors.append(sample['color'][i])
+                highest_contrast_neighbor_colors.append(sample['highest_contrast_neighbor_color'][i])
                 invariants.append(sample['invariants'][i])
 
         target = sample['targets']
@@ -208,142 +124,11 @@ class GraphMNIST(torch.utils.data.Dataset):
             cossins = cossins,
             invariants=invariants,
             colors=colors,
+            highest_contrast_neighbor_colors=highest_contrast_neighbor_colors,
             target=target,
-            img_path=sample['img_paths']
+            img_path=sample['img_paths'],
             )
 
-        # print(sample.keys())
-        # batch_nodes_dark = [meta_datum.index.astype(np.int32).to_numpy() for meta_datum in meta_data]
-        # batch_nodes_bright = [meta_datum['highest_contrast_neighbor'].to_numpy() for meta_datum in meta_data]
-        # batch_colors = [meta_datum['highest_contrast_neighbor_color'].to_numpy() for meta_datum in meta_data]
-        # batch_invariants = [[moment for moment in meta_datum['highest_contrast_neighbor_invariants'].to_numpy()] for meta_datum in meta_data]
-
-
-
-        # return dict(
-        #     img_rgb=img_rgb,
-        #     locations=edge_locations,
-        #     orientations=edge_orientations,
-        #     target=target,
-        #     segments=labels,
-        #     meta_data=pd.DataFrame.from_dict(meta_data, orient='index'),
-        #     ##########
-        #     node_centers=node_centers
-        #     )
-
-
-
-        # return torch.ones(3,3)
-
-
-class SuperpixelEdgesDataset(torch.utils.data.Dataset):
-    """Invariant dataset."""
-    def __init__(self,orig_dataset):
-        """
-        Args:
-            orig_dataset (Dataset): dataset
-        """
-        self.orig_dataset = orig_dataset
-
-    def __len__(self):
-        return len(self.orig_dataset)
-
-    def __getitem__(self, idx):
-
-        img,target = self.orig_dataset[idx]
-        # 'convert' to rgb
-        img_rgb = np.zeros((28,28,3))
-        img_rgb[:,:,2] = img
-        img_rgb[:,:,1] = img
-        img_rgb[:,:,0] = img
-
-        img = np.float32(np.asarray(img[0,:,:]))/255
-        labels = slic(img_rgb, n_segments = 25, compactness = 50, sigma = 0.1, start_label=0)
-        # labels = slic(img_rgb, n_segments = 30, sigma = 0.1, start_label=0)
-        p = regionprops(labels+1,intensity_image=img)
-        g = graph.rag_mean_color(img_rgb, labels)
-        # g = graph.rag_mean_color(img, labels)
-
-        feats = []
-        coords = []
-     
-        edge_locations = []
-        edge_orientations = []
-
-        rows, columns = [], []
-
-        node_centers = []
-
-        meta_data = {}
-
-
-        for node in g.nodes:
-            neighbors = get_neighbors(node, g.edges)
-
-
-            highest_contrast_neighbor = get_highest_contrast_neighbor(g, node, neighbors)
-
-
-            rows.append(node)
-            columns.append(highest_contrast_neighbor)
-
-            edge_center = (np.array(p[node].centroid) + np.array(p[highest_contrast_neighbor].centroid))/2
-            edge_center = edge_center[::-1] # conform to x, y ordering
-
-            edge_orientation = np.rad2deg(
-                np.arctan2(
-                    p[highest_contrast_neighbor].centroid[-1] - p[highest_contrast_neighbor].centroid[0],
-                    p[node].centroid[-1] - p[node].centroid[0]
-                    ))
-            
-            edge_locations.append(torch.Tensor(np.array(edge_center)))
-            edge_orientations.append(edge_orientation)
-
-            color = p[node]['mean_intensity']
-            orientation = p[node].orientation
-            invariants = p[node]['moments_hu']
-
-
-            center = torch.Tensor(p[node]['centroid'][::-1]).unsqueeze(0)
-            feat = torch.cat([torch.Tensor([color]),torch.Tensor(invariants)]).unsqueeze(0)
-            feats.append(feat)
-            coords.append(center)
-
-
-            node_centers.append(center)
-
-
-            meta_data[str(node)] = dict(
-                center=p[node].centroid[::-1],
-                color=color,
-                invariants=invariants,
-                is_darker=(color <= p[highest_contrast_neighbor].mean_intensity).astype(np.int32),
-                highest_contrast_neighbor=highest_contrast_neighbor,
-                highest_contrast_neighbor_loc=p[highest_contrast_neighbor].centroid[::-1],
-                highest_contrast_neighbor_color=p[highest_contrast_neighbor].mean_intensity,
-                highest_contrast_neighbor_invariants=p[highest_contrast_neighbor].moments_hu,
-                angle_between=get_bearing(p[node].centroid[::-1], p[highest_contrast_neighbor].centroid[::-1]),
-                center_between=edge_center,
-                )
-
-
-        edge_locations = torch.stack(edge_locations, dim=0)
-        edge_orientations = torch.Tensor(np.array(edge_orientations))
-
-        feats = torch.cat(feats,dim=0)
-        coords = torch.cat(coords,dim=0)
-        node_centers = torch.cat(node_centers,dim=0)
-
-        return dict(
-            img_rgb=img_rgb,
-            locations=edge_locations,
-            orientations=edge_orientations,
-            target=target,
-            segments=labels,
-            meta_data=pd.DataFrame.from_dict(meta_data, orient='index'),
-            ##########
-            node_centers=node_centers
-            )
 
 
 
@@ -410,15 +195,35 @@ if __name__ == '__main__':
 
     graph_mnist_train = GraphMNIST()
     graph_mnist_test = GraphMNIST(is_train=False)
-    # print(len(graph_mnist_test))
 
-    # trainloader = torch.utils.data.DataLoader(graph_mnist_train, batch_size=16, shuffle=True, collate_fn=collate)
-    graph_trainloader = torch.utils.data.DataLoader(graph_mnist_train, batch_size=16, shuffle=True, collate_fn=collate_graph)
+    graph_trainloader = torch.utils.data.DataLoader(graph_mnist_train, batch_size=1, shuffle=True, collate_fn=collate_graph)
     graph_testloader = torch.utils.data.DataLoader(graph_mnist_test, batch_size=1, shuffle=False, collate_fn=collate_graph)
 
 
     graph_sample = next(iter(graph_trainloader))
     print(graph_sample.keys())
+
+    edges = [graph_sample['edges'][0].flatten(),graph_sample['edges'][1].flatten()]
+
+
+    # print(graph_sample['img_paths'][0])
+    # print(graph_sample['target'][0])
+
+    # img = np.load(graph_sample['img_paths'][0])
+    # plt.imshow(img)
+
+    # coords = graph_sample['locations'][:graph_sample['n_nodes']] * 28
+    # print(coords.shape)
+    # print(coords)
+    # plt.scatter(coords[:,1], coords[:,0])
+    # print(graph_sample['feats'].min())
+
+    # print(graph_sample['batch_size'])
+    # print()
+
+
+    # plt.show()
+    # print(graph_sample['feature_size'])
     # test_sample = next(iter(graph_testloader))
     # print(graph_sample['locations'].size())
     # print(test_sample['locations'].size())
@@ -489,16 +294,16 @@ if __name__ == '__main__':
     # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
 
-    # model = EGNN(
-    #     in_node_nf=9, # 9
-    #     hidden_nf=100,
-    #     out_node_nf=10,
-    #     in_edge_nf=0,
-    #     attention=True,
-    #     normalize=True,
-    #     n_layers=6,
-    # ).to(device)
-
+    model = EGNN(
+        in_node_nf=1, # 9
+        hidden_nf=100,
+        out_node_nf=10,
+        in_edge_nf=0,
+        attention=True,
+        normalize=True,
+        n_layers=6,
+    ).to('cpu')
+    # print(model)
     # out_feats, out_coords = model(feats, coords, edges, edge_attr=None)
     # scores = out_feats.view(batch_size,n_nodes,-1).mean(1)
     # print(scores.size())

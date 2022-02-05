@@ -1,3 +1,4 @@
+*.pt
 graph_mnist/
 *.npy
 del.py
