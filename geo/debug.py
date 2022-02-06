@@ -12,61 +12,90 @@ from torch_geometric.nn import (NNConv, global_mean_pool, graclus, max_pool,
 from torch_geometric.utils import normalized_cut
 
 
-
 from egnn_pytorch import *
 from egnn_pytorch_geometric import *
+
 from graph_mnist import GraphMNIST
 
 
 
-
-path = 'data/'
-transform = T.Cartesian(cat=False)
-
-train_dataset = MNISTSuperpixels(path, True, transform=transform)[:6000]
-# test_dataset = MNISTSuperpixels(path, False, transform=transform)[:1000]
-train_loader = DataLoader(train_dataset, batch_size=1, shuffle=True)
-# test_loader = DataLoader(test_dataset, batch_size=64, shuffle=False)
-
-
-sample = next(iter(train_loader))
-print(sample.keys)
-print(sample.x.size())
-print(sample.edge_index.size())
-print(sample.edge_attr.size())
-# print(sample.x.size())
-
-
-print(sample.y)
 layer = EGNN_Sparse(feats_dim=10,
-			        pos_dim=2,
-
+                    pos_dim=2,
                     # edge_attr_dim=4,
                     m_dim=16,
                     # fourier_features=4
                     )
 
-feats = torch.randn(75, 1)
-coors = torch.randn(75, 2)
-x = torch.cat([coors, feats], dim=-1)
-edge_idxs = (torch.rand(2, 1383) * 75).long()
-print('-'*20)
-
-print(x.dtype)
-print(edge_idxs.dtype)
-# print(layer.forward(x, edge_idxs, edge_attr=None).shape)
-print('-'*20)
-
-
+model = EGNN_Sparse_Network(
+                    n_layers =3,
+                    feats_dim=10,
+                    pos_dim=2,
+                    m_dim=16,
+                    # embedding_nums=[5],
+                    # embedding_dims=[10],
+                    # edge_embedding_nums=[5], 
+                    # edge_embedding_dims=[10],
+                    )
 
 
 
+training_set = GraphMNIST('.', is_train=True)
+test_set = GraphMNIST('.', is_train=False)
 
 
-dataset = GraphMNIST('.')
-
-train_loader = DataLoader(dataset, batch_size=1, shuffle=True)
+batch_size = 1
+train_loader = DataLoader(training_set, batch_size=batch_size, shuffle=True)
+test_loader = DataLoader(test_set, batch_size=batch_size, shuffle=True)
 datum = next(iter(train_loader))
-print(datum.x.dtype)
-print(datum.edge_index.dtype)
-print(layer.forward(datum.x, datum.edge_index, edge_attr=None).shape)
+# print(datum.x.dtype)
+# print(datum.edge_index.dtype)
+# print(layer.forward(datum.x, datum.edge_index, edge_attr=None))
+# print(model.forward(datum.x, datum.edge_index, datum.batch, None, bsize=1))
+
+
+
+# optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+# optimizer = torch.optim.Adam(model.parameters(),lr=1e-5)
+# optimizer = torch.optim.Adam(model.parameters(),lr=1e-4)
+optimizer = torch.optim.Adam(model.parameters(),lr=1e-3)
+
+# print(len(train_loader))
+# print(len(test_loader))
+loss_function = torch.nn.CrossEntropyLoss()
+
+
+for epoch in range(15):
+    # training loop
+    model.train()
+    epoch_training_loss = 0
+    for i, subsample in enumerate(train_loader):
+        # data = data.to(device)
+        optimizer.zero_grad()
+        out_feats = model(subsample.x, subsample.edge_index, subsample.batch, None, bsize=batch_size)
+        n_nodes = out_feats.size(0)
+        scores = out_feats.view(batch_size,n_nodes,-1).mean(1)
+        # scores = F.softmax(out_feats.view(batch_size,n_nodes,-1).mean(1), dim=1)
+        loss = loss_function(scores,subsample.y)
+        # if i % 250 == 0:
+        #   print(loss.item())
+        epoch_training_loss += loss.item()
+
+        loss.backward()
+        optimizer.step()
+
+    optimizer.param_groups[0]['lr'] *= 0.9
+    print(f"Training loss for epoch {epoch}: {epoch_training_loss / len(train_loader):.2f}")
+
+    # evaluation loop
+    model.eval()
+    total_correct = 0
+    with torch.no_grad():
+        for i, subsample in enumerate(test_loader):
+            out_feats = model(subsample.x, subsample.edge_index, subsample.batch, None, bsize=batch_size)
+            n_nodes = out_feats.size(0)
+            scores = F.softmax(out_feats.view(batch_size,n_nodes,-1).mean(1), dim=1)
+            _, predicted = torch.max(scores.data, 1)
+            total_correct += (predicted == subsample.y).sum().item()
+
+    accuracy = (100 * total_correct) / (len(test_loader)*batch_size)
+    print(f"Evaluation accuracy for epoch {epoch}: {accuracy:.2f} percent.")

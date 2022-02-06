@@ -402,7 +402,8 @@ class EGNN_Sparse_Network(nn.Module):
         x = embedd_token(x, self.embedding_dims, self.emb_layers)
 
         # regulates wether to embedd edges each layer
-        edges_need_embedding = True  
+        # edges_need_embedding = True  
+        edges_need_embedding = False  
         for i,layer in enumerate(self.mpnn_layers):
             
             # EDGES - Embedd each dim to its target dimensions:

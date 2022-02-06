@@ -42,6 +42,8 @@ def fourier_encode_dist(x, num_encodings = 4, include_self = True):
 
 def embedd_token(x, dims, layers):
     stop_concat = -len(dims)
+    # print('-'*20)
+    # print(x.size())
     to_embedd = x[:, stop_concat:].long()
     for i,emb_layer in enumerate(layers):
         # the portion corresponding to `to_embedd` part gets dropped

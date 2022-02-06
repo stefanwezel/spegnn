@@ -7,10 +7,14 @@ from torch_geometric.loader import DataLoader
 
 
 class GraphMNIST(InMemoryDataset):
-    def __init__(self, root, transform=None, pre_transform=None, pre_filter=None):
+    def __init__(self, root, is_train=True,transform=None, pre_transform=None, pre_filter=None):
         super().__init__(root, transform, pre_transform, pre_filter)
 
-        self.data, self.slices = torch.load(self.processed_paths[0])
+        self.is_train = is_train
+        if self.is_train:
+            self.data, self.slices = torch.load(self.processed_paths[0])
+        else:
+            self.data, self.slices = torch.load(self.processed_paths[1])
 
     # @property
     # def raw_file_names(self):
@@ -18,8 +22,11 @@ class GraphMNIST(InMemoryDataset):
 
     @property
     def processed_file_names(self):
-        return ['graph_mnist.pt']
+        return ['graph_mnist_train.pt', 'graph_mnist_test.pt',]
 
+    # @property
+    # def is_train(self, is_train):
+        # return True
     # def download(self):
     #     # Download to `self.raw_dir`.
     #     download_url(url, self.raw_dir)
@@ -63,8 +70,8 @@ class GraphMNIST(InMemoryDataset):
                 invariants.append(invariant[i])
 
         x = torch.cat((
-            torch.tensor(np.array(locs)),
-            torch.tensor(np.array(colors)).unsqueeze(1),
+            torch.tensor(np.array(locs)/28),
+            torch.tensor(np.array(colors)/255).unsqueeze(1),
             torch.tensor(np.array(sins)).unsqueeze(1),
             torch.tensor(np.array(coss)).unsqueeze(1),
             torch.tensor(np.array(invariants)),
@@ -81,8 +88,10 @@ class GraphMNIST(InMemoryDataset):
 
     def process(self):
         # load pre-processed mnist graph data (created with SLIC, see generate_graph_mnist.py)
-        with open('test_data.pickle', "rb") as fp:
+        with open('train_data.pickle', "rb") as fp:
             data_dict = pickle.load(fp)
+        # with open('test_data.pickle', "rb") as fp:
+        #     data_dict = pickle.load(fp)
         
         # Read data into huge `Data` list.
         data_list = [self.preprocess_datum(
@@ -111,16 +120,17 @@ class GraphMNIST(InMemoryDataset):
         data, slices = self.collate(data_list)
 
         torch.save((data, slices), self.processed_paths[0])
-
+        # torch.save((data, slices), self.processed_paths[1])
 
 
 
 if __name__ == '__main__':
     dataset = GraphMNIST('.')
+    # dataset = GraphMNIST('.', is_train=False)
 
-    # train_loader = DataLoader(dataset, batch_size=1, shuffle=True)
-    # datum = next(iter(train_loader))
-    # print(datum.keys)
+    train_loader = DataLoader(dataset, batch_size=1, shuffle=True)
+    datum = next(iter(train_loader))
+    print(datum.keys)
 
 
 
