@@ -106,6 +106,7 @@ class EGNN_Sparse(MessagePassing):
         self,
         feats_dim,
         pos_dim=3,
+        orient_dim=2,
         edge_attr_dim = 0,
         m_dim = 16,
         fourier_features = 0,
@@ -128,6 +129,7 @@ class EGNN_Sparse(MessagePassing):
         self.fourier_features = fourier_features
         self.feats_dim = feats_dim
         self.pos_dim = pos_dim
+        self.orient_dim = orient_dim
         self.m_dim = m_dim
         self.soft_edge = soft_edge
         self.norm_feats = norm_feats
@@ -190,10 +192,23 @@ class EGNN_Sparse(MessagePassing):
             * angle_data: list of tensors (levels, n_edges_i, n_length_path) long tensor.
             * size: None
         """
-        coors, feats = x[:, :self.pos_dim], x[:, self.pos_dim:]
-        
+        # coors, feats = x[:, :self.pos_dim], x[:, self.pos_dim+2:]
+        # print(feats.size())
+        coors = x[:, :self.pos_dim]
+        # print(coors.size())
+        orient = x[:, self.pos_dim:self.pos_dim+self.orient_dim]
+        feats = x[:, self.pos_dim+self.orient_dim:]
+        # print(feats.size())
+        # print('----')
+
         rel_coors = coors[edge_index[0]] - coors[edge_index[1]]
         rel_dist  = (rel_coors ** 2).sum(dim=-1, keepdim=True)
+
+        # TODO
+        # relative angle (subtract angle)
+        # compute sin and cosine and use as features
+
+
 
         if self.fourier_features > 0:
             rel_dist = fourier_encode_dist(rel_dist, num_encodings = self.fourier_features)
@@ -204,10 +219,19 @@ class EGNN_Sparse(MessagePassing):
         else:
             edge_attr_feats = rel_dist
 
+        print(feats.size())
+
         hidden_out, coors_out = self.propagate(edge_index, x=feats, edge_attr=edge_attr_feats,
                                                            coors=coors, rel_coors=rel_coors, 
                                                            batch=batch)
-        return torch.cat([coors_out, hidden_out], dim=-1)
+
+        print(hidden_out.size())
+        print(coors_out.size())
+        print()
+        # x_new =torch.cat([coors_out, hidden_out], dim=-1)
+        x_new =torch.cat([coors_out, orient, hidden_out], dim=-1)
+        print(x_new.size())
+        return x_new
 
 
     def message(self, x_i, x_j, edge_attr) -> Tensor:
@@ -241,6 +265,8 @@ class EGNN_Sparse(MessagePassing):
             if self.coor_weights_clamp_value:
                 coor_weights_clamp_value = self.coor_weights_clamp_value
                 coor_weights.clamp_(min = -clamp_value, max = clamp_value)
+
+
 
             # normalize if needed
             kwargs["rel_coors"] = self.coors_norm(kwargs["rel_coors"])
@@ -296,6 +322,7 @@ class EGNN_Sparse_Network(nn.Module):
     """
     def __init__(self, n_layers, feats_dim, 
                  pos_dim = 3,
+                 orient_dim = 2,
                  edge_attr_dim = 0, 
                  m_dim = 16,
                  fourier_features = 0, 
@@ -344,6 +371,7 @@ class EGNN_Sparse_Network(nn.Module):
         self.mpnn_layers      = nn.ModuleList()
         self.feats_dim        = feats_dim
         self.pos_dim          = pos_dim
+        self.orient_dim          = orient_dim
         self.edge_attr_dim    = edge_attr_dim
         self.m_dim            = m_dim
         self.fourier_features = fourier_features
@@ -367,6 +395,7 @@ class EGNN_Sparse_Network(nn.Module):
         for i in range(n_layers):
             layer = EGNN_Sparse(feats_dim = feats_dim,
                                 pos_dim = pos_dim,
+                                orient_dim = orient_dim,
                                 edge_attr_dim = edge_attr_dim,
                                 m_dim = m_dim,
                                 fourier_features = fourier_features, 
@@ -421,7 +450,10 @@ class EGNN_Sparse_Network(nn.Module):
             # pass layers
             is_global_layer = self.has_global_attn and (i % self.global_linear_attn_every) == 0
             if not is_global_layer:
+                print(x.size())
                 x = layer(x, edge_index, edge_attr, batch=batch, size=bsize)
+                # print(x.size())
+
             else: 
                 # only pass feats to the attn layer
                 x_attn = layer[0](x[:, self.pos_dim:], global_tokens)

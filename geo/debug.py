@@ -19,17 +19,20 @@ from graph_mnist import GraphMNIST
 
 
 
-layer = EGNN_Sparse(feats_dim=10,
-                    pos_dim=2,
-                    # edge_attr_dim=4,
-                    m_dim=16,
-                    # fourier_features=4
-                    )
+# layer = EGNN_Sparse(feats_dim=10,
+#                     pos_dim=2,
+#                     orient_dim=2,
+#                     # edge_attr_dim=4,
+#                     m_dim=16,
+#                     # fourier_features=4
+#                     )
 
 model = EGNN_Sparse_Network(
                     n_layers =3,
-                    feats_dim=10,
+                    feats_dim=8,
+                    # feats_dim=10,
                     pos_dim=2,
+                    orient_dim=2,
                     m_dim=16,
                     # embedding_nums=[5],
                     # embedding_dims=[10],
@@ -47,20 +50,13 @@ batch_size = 1
 train_loader = DataLoader(training_set, batch_size=batch_size, shuffle=True)
 test_loader = DataLoader(test_set, batch_size=batch_size, shuffle=True)
 datum = next(iter(train_loader))
-# print(datum.x.dtype)
-# print(datum.edge_index.dtype)
 # print(layer.forward(datum.x, datum.edge_index, edge_attr=None))
-# print(model.forward(datum.x, datum.edge_index, datum.batch, None, bsize=1))
 
-
-
-# optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+# print(datum.x[.size())
 # optimizer = torch.optim.Adam(model.parameters(),lr=1e-5)
 # optimizer = torch.optim.Adam(model.parameters(),lr=1e-4)
-optimizer = torch.optim.Adam(model.parameters(),lr=1e-3)
 
-# print(len(train_loader))
-# print(len(test_loader))
+optimizer = torch.optim.Adam(model.parameters(),lr=1e-3)
 loss_function = torch.nn.CrossEntropyLoss()
 
 
