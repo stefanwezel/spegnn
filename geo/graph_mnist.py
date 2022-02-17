@@ -9,7 +9,9 @@ from torch_geometric.loader import DataLoader
 class GraphMNIST(InMemoryDataset):
     def __init__(self, root, is_train=True,transform=None, pre_transform=None, pre_filter=None):
         self.is_train = is_train
+
         super().__init__(root, transform, pre_transform, pre_filter)
+
         if self.is_train:
             self.data, self.slices = torch.load(self.processed_paths[0])
         else:
