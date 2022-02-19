@@ -141,6 +141,10 @@ class EGNN_Sparse(MessagePassing):
         self.edge_input_dim = (fourier_features * 2) + edge_attr_dim + 1 + (feats_dim * 2)
         self.dropout = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
+
+
+        self.complex_dist = lambda a,b: torch.sqrt((b.real - a.real)**2 + (b.imag - a.imag)**2)
+
         # EDGES
         self.edge_mlp = nn.Sequential(
             nn.Linear(self.edge_input_dim, self.edge_input_dim * 2),
@@ -197,29 +201,20 @@ class EGNN_Sparse(MessagePassing):
         orient = x[:, self.pos_dim:self.pos_dim+self.orient_dim]
         feats = x[:, self.pos_dim+self.orient_dim:]
 
-        # print(coors[edge_index[0]].size())
-        # print(coors[edge_index[1]].size())
-        # print()
-        print(edge_index)
-        print()
         rel_coors = coors[edge_index[0]] - coors[edge_index[1]]
         rel_dist  = (rel_coors ** 2).sum(dim=-1, keepdim=True)
 
-        # TODO
-        # print(coors.size())
-        # print()
-        # print(orient.size())
-        # print()
-        # print(edge_index)
         # relative angle (subtract angle)
-        rel_orient = orient[edge_index[0]] - orient[edge_index[1]] 
-        # rel_
-        # print(rel_orient)
+        cartesian_i = torch.polar(torch.ones_like(orient[edge_index[0]]), torch.deg2rad(orient[edge_index[0]]))
+        cartesian_j = torch.polar(torch.ones_like(orient[edge_index[1]]), torch.deg2rad(orient[edge_index[1]]))
+
+        rel_orient_dist = self.complex_dist(cartesian_i, cartesian_j)
+        print(rel_orient_dist)
+
+
+
 
         # compute sin and cosine and use as features
-
-
-
         if self.fourier_features > 0:
             rel_dist = fourier_encode_dist(rel_dist, num_encodings = self.fourier_features)
             rel_dist = rearrange(rel_dist, 'n () d -> n d')
