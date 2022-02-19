@@ -49,30 +49,34 @@ class GraphMNIST(InMemoryDataset):
 
         mask = datum_dict['mask']
         loc = datum_dict['loc']
-        sin = datum_dict['sin']
-        cos = datum_dict['cos']
+        orient = datum_dict['orient']
+        # sin = datum_dict['sin']
+        # cos = datum_dict['cos']
         color = datum_dict['color']
         invariant = datum_dict['invariant']
         target = datum_dict['target']
 
         locs = []
-        sins = []
-        coss = []
+        orients = []
+        # sins = []
+        # coss = []
         colors = []
         invariants = []
 
         for i in range(len(mask)):
             if mask[i] == 1:
                 locs.append(loc[i])
-                sins.append(sin[i])
-                coss.append(cos[i])
+                orients.append(orient[i])
+                # sins.append(sin[i])
+                # coss.append(cos[i])
                 colors.append(color[i])
                 invariants.append(invariant[i])
 
         x = torch.cat((
             torch.tensor(np.array(locs)/28),
-            torch.tensor(np.array(sins)).unsqueeze(1),
-            torch.tensor(np.array(coss)).unsqueeze(1),
+            torch.tensor(np.array(orients)).unsqueeze(1),
+            # torch.tensor(np.array(sins)).unsqueeze(1),
+            # torch.tensor(np.array(coss)).unsqueeze(1),
             torch.tensor(np.array(colors)/255).unsqueeze(1),
             torch.tensor(np.array(invariants)),
             ), dim=1).float()
@@ -100,18 +104,20 @@ class GraphMNIST(InMemoryDataset):
                 dict(
                     mask=t[0],
                     loc=t[1],
-                    sin=t[2],
-                    cos=t[3],
-                    color=t[4],
-                    invariant=t[5],
+                    orient=t[2],
+                    # sin=t[2],
+                    # cos=t[3],
+                    color=t[3],
+                    invariant=t[4],
                     #
                     target=t[-1],
                     )
                 ) for t in zip(
             data_dict['is_darker'],
             data_dict['center_between'],
-            data_dict['sin'],
-            data_dict['cos'],
+            data_dict['angle_between'],
+            # data_dict['sin'],
+            # data_dict['cos'],
             data_dict['highest_contrast_neighbor_color'],
             data_dict['invariants'],
             # 

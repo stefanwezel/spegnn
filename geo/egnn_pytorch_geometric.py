@@ -106,7 +106,7 @@ class EGNN_Sparse(MessagePassing):
         self,
         feats_dim,
         pos_dim=3,
-        orient_dim=2,
+        orient_dim=1,
         edge_attr_dim = 0,
         m_dim = 16,
         fourier_features = 0,
@@ -186,26 +186,36 @@ class EGNN_Sparse(MessagePassing):
                 angle_data: List = None,  size: Size = None) -> Tensor:
         """ Inputs: 
             * x: (n_points, d) where d is pos_dims + feat_dims
-            * edge_index: (n_edges, 2)
+            * edge_index: (n_edges, 2) # (more like the other way round)
             * edge_attr: tensor (n_edges, n_feats) excluding basic distance feats.
             * batch: (n_points,) long tensor. specifies xloud belonging for each point
             * angle_data: list of tensors (levels, n_edges_i, n_length_path) long tensor.
             * size: None
         """
-        # coors, feats = x[:, :self.pos_dim], x[:, self.pos_dim+2:]
-        # print(feats.size())
+        # coors, feats = x[:, :self.pos_dim], x[:, self.pos_dim+2:] # legacy
         coors = x[:, :self.pos_dim]
-        # print(coors.size())
         orient = x[:, self.pos_dim:self.pos_dim+self.orient_dim]
         feats = x[:, self.pos_dim+self.orient_dim:]
-        # print(feats.size())
-        # print('----')
 
+        # print(coors[edge_index[0]].size())
+        # print(coors[edge_index[1]].size())
+        # print()
+        print(edge_index)
+        print()
         rel_coors = coors[edge_index[0]] - coors[edge_index[1]]
         rel_dist  = (rel_coors ** 2).sum(dim=-1, keepdim=True)
 
         # TODO
+        # print(coors.size())
+        # print()
+        # print(orient.size())
+        # print()
+        # print(edge_index)
         # relative angle (subtract angle)
+        rel_orient = orient[edge_index[0]] - orient[edge_index[1]] 
+        # rel_
+        # print(rel_orient)
+
         # compute sin and cosine and use as features
 
 
@@ -219,18 +229,16 @@ class EGNN_Sparse(MessagePassing):
         else:
             edge_attr_feats = rel_dist
 
-        print(feats.size())
 
         hidden_out, coors_out = self.propagate(edge_index, x=feats, edge_attr=edge_attr_feats,
                                                            coors=coors, rel_coors=rel_coors, 
                                                            batch=batch)
 
-        print(hidden_out.size())
-        print(coors_out.size())
-        print()
-        # x_new =torch.cat([coors_out, hidden_out], dim=-1)
+
+        # x_new =torch.cat([coors_out, hidden_out], dim=-1) # legacy
         x_new =torch.cat([coors_out, orient, hidden_out], dim=-1)
-        print(x_new.size())
+
+
         return x_new
 
 
@@ -450,9 +458,7 @@ class EGNN_Sparse_Network(nn.Module):
             # pass layers
             is_global_layer = self.has_global_attn and (i % self.global_linear_attn_every) == 0
             if not is_global_layer:
-                print(x.size())
                 x = layer(x, edge_index, edge_attr, batch=batch, size=bsize)
-                # print(x.size())
 
             else: 
                 # only pass feats to the attn layer
