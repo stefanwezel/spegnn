@@ -7,20 +7,22 @@ import matplotlib.pyplot as plt
 
 
 def get_bearing(p1,p2):
-    lat1 = p1[1]
-    long1 = p1[0]
-    lat2 = p2[1]
-    long2 = p2[0]
-    # lat1 = p1[0]
-    # long1 = p1[1]
-    # lat2 = p2[0]
-    # long2 = p2[1]
+    # lat1 = p1[1]
+    # long1 = p1[0]
+    # lat2 = p2[1]
+    # long2 = p2[0]
+    lat1 = p1[0]
+    long1 = p1[1]
+    lat2 = p2[0]
+    long2 = p2[1]
 
     dLon = (long2 - long1)
     x = math.cos(math.radians(lat2)) * math.sin(math.radians(dLon))
     y = math.cos(math.radians(lat1)) * math.sin(math.radians(lat2)) - math.sin(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.cos(math.radians(dLon))
     brng = np.arctan2(x,y)
     brng = np.degrees(brng)
+    if brng < 0:
+        brng += 360
 
     return brng
 
@@ -75,3 +77,10 @@ def plot_line(ax, center, slope, length=1):
 
     # ax.plot((pt1[0], center[0]), (pt1[1], center[1]), color='red', linewidth=0.5)
     ax.plot((center[0], pt2[0]), (center[1], pt2[1]), color='red', linewidth=0.5)
+
+
+# for debugging
+if __name__ == '__main__':
+    print(
+        get_bearing((-1,0), (0,2))
+        )

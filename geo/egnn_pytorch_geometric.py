@@ -27,6 +27,14 @@ except:
 
 from egnn_pytorch import *
 
+
+
+def normalize(t):
+    return 2 * (t - t.min()) / (t.max() - t.min()) - 1
+
+
+
+
 # global linear attention
 
 class Attention_Sparse(Attention):
@@ -115,7 +123,8 @@ class EGNN_Sparse(MessagePassing):
         norm_coors = False,
         norm_coors_scale_init = 1e-2,
         update_feats = True,
-        update_coors = True, 
+        update_coors = True,
+        update_orients=True,
         dropout = 0.,
         coor_weights_clamp_value = None, 
         aggr = "add",
@@ -135,6 +144,7 @@ class EGNN_Sparse(MessagePassing):
         self.norm_feats = norm_feats
         self.norm_coors = norm_coors
         self.update_coors = update_coors
+        self.update_orients = update_orients
         self.update_feats = update_feats
         self.coor_weights_clamp_value = None
 
@@ -142,8 +152,8 @@ class EGNN_Sparse(MessagePassing):
         self.dropout = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
 
-
-        self.complex_dist = lambda a,b: torch.sqrt((b.real - a.real)**2 + (b.imag - a.imag)**2)
+        # self.complex_dist = lambda a,b: torch.sqrt((b.real - a.real)**2 + (b.imag - a.imag)**2)
+        self.complex_dist = lambda rel: torch.sqrt((rel.real)**2 + (rel.imag)**2)
 
         # EDGES
         self.edge_mlp = nn.Sequential(
@@ -177,6 +187,15 @@ class EGNN_Sparse(MessagePassing):
             nn.Linear(self.m_dim * 4, 1)
         ) if update_coors else None
 
+        self.orients_mlp = nn.Sequential(
+            nn.Linear(m_dim, m_dim * 4),
+            self.dropout,
+            SiLU(),
+            nn.Linear(self.m_dim * 4, 1)
+        ) if update_orients else None
+
+
+
         self.apply(self.init_)
 
     def init_(self, module):
@@ -201,16 +220,37 @@ class EGNN_Sparse(MessagePassing):
         orient = x[:, self.pos_dim:self.pos_dim+self.orient_dim]
         feats = x[:, self.pos_dim+self.orient_dim:]
 
+        # normalize coords into range between -1 and 1
+        coors = normalize(coors)
+
         rel_coors = coors[edge_index[0]] - coors[edge_index[1]]
         rel_dist  = (rel_coors ** 2).sum(dim=-1, keepdim=True)
 
         # relative angle (subtract angle)
-        cartesian_i = torch.polar(torch.ones_like(orient[edge_index[0]]), torch.deg2rad(orient[edge_index[0]]))
-        cartesian_j = torch.polar(torch.ones_like(orient[edge_index[1]]), torch.deg2rad(orient[edge_index[1]]))
+        cartesian_i = torch.polar(
+                torch.ones_like(orient[edge_index[0]]), # on unit-circle 
+                torch.deg2rad(orient[edge_index[0]])
+                )
+        cartesian_j = torch.polar(
+                torch.ones_like(orient[edge_index[1]]), # on unit-circle
+                torch.deg2rad(orient[edge_index[1]])
+                )
 
-        rel_orient_dist = self.complex_dist(cartesian_i, cartesian_j)
-        print(rel_orient_dist)
+        sin = torch.sin(torch.deg2rad(orient[edge_index[0]] - orient[edge_index[1]]))
+        cos = torch.cos(torch.deg2rad(orient[edge_index[0]] - orient[edge_index[1]]))
 
+        rel_orients = torch.cat((sin,cos), dim=-1)
+
+        self.orient_dist = lambda alpha: torch.sqrt(alpha[:,0]**2 + alpha[:,1]**2).unsqueeze(-1)
+        rel_orient_dist = self.orient_dist(rel_orients)
+        # print(rel_orient_dist.size())
+
+
+        # rel_orients = cartesian_i - cartesian_j
+        # self.complex_dist = lambda rel: torch.sqrt((rel.real)**2 + (rel.imag)**2)
+
+        # rel_orient_dist = self.complex_dist(rel_orients)
+        # print(rel_orient_dist.size())
 
 
 
@@ -222,11 +262,13 @@ class EGNN_Sparse(MessagePassing):
         if exists(edge_attr):
             edge_attr_feats = torch.cat([edge_attr, rel_dist], dim=-1)
         else:
-            edge_attr_feats = rel_dist
+            # edge_attr_feats = rel_dist
+            edge_attr_feats = torch.cat([rel_dist, rel_orient_dist], dim=-1)
 
 
         hidden_out, coors_out = self.propagate(edge_index, x=feats, edge_attr=edge_attr_feats,
-                                                           coors=coors, rel_coors=rel_coors, 
+                                                           coors=coors, rel_coors=rel_coors,
+                                                           orients=orient, rel_orients=rel_orients,
                                                            batch=batch)
 
 
@@ -258,8 +300,11 @@ class EGNN_Sparse(MessagePassing):
         aggr_kwargs = self.inspector.distribute('aggregate', coll_dict)
         update_kwargs = self.inspector.distribute('update', coll_dict)
         
+        # print(msg_kwargs['edge_attr'].size())
+
         # get messages
         m_ij = self.message(**msg_kwargs)
+        # print(m_ij.size())
 
         # update coors if specified
         if self.update_coors:
@@ -269,8 +314,6 @@ class EGNN_Sparse(MessagePassing):
                 coor_weights_clamp_value = self.coor_weights_clamp_value
                 coor_weights.clamp_(min = -clamp_value, max = clamp_value)
 
-
-
             # normalize if needed
             kwargs["rel_coors"] = self.coors_norm(kwargs["rel_coors"])
 
@@ -278,6 +321,18 @@ class EGNN_Sparse(MessagePassing):
             coors_out = kwargs["coors"] + mhat_i
         else:
             coors_out = kwargs["coors"]
+
+
+        if self.update_orients:
+            orient_wij = self.orients_mlp(m_ij)
+            # if self.orient_weights_clamp_value:
+            #     orient_weights_clamp_value = self.orient_weights_clamp_value
+            #     orient_weights.clamp_(min = -clamp_value, max = clamp_value)
+            kwargs['rel_orients'] = self.coors_norm(kwargs['rel_orients']) # SE3 Transformers norm
+            nhat_i = self.aggregate(orient_wij * kwargs["rel_orients"], **aggr_kwargs)
+            orients_out = kwargs['orients'] + nhat_i
+
+
 
         # update feats if specified
         if self.update_feats:
@@ -293,6 +348,7 @@ class EGNN_Sparse(MessagePassing):
             hidden_out = kwargs["x"]
 
         # return tuple
+        # print(type(self.update))
         return self.update((hidden_out, coors_out), **update_kwargs)
 
     def __repr__(self):
@@ -334,7 +390,8 @@ class EGNN_Sparse_Network(nn.Module):
                  embedding_dims=[],
                  edge_embedding_nums=[], 
                  edge_embedding_dims=[],
-                 update_coors=True, 
+                 update_coors=True,
+                 update_orients=True,
                  update_feats=True, 
                  norm_feats=True, 
                  norm_coors=False,
@@ -374,7 +431,7 @@ class EGNN_Sparse_Network(nn.Module):
         self.mpnn_layers      = nn.ModuleList()
         self.feats_dim        = feats_dim
         self.pos_dim          = pos_dim
-        self.orient_dim          = orient_dim
+        self.orient_dim       = orient_dim
         self.edge_attr_dim    = edge_attr_dim
         self.m_dim            = m_dim
         self.fourier_features = fourier_features
@@ -384,6 +441,7 @@ class EGNN_Sparse_Network(nn.Module):
         self.norm_coors_scale_init = norm_coors_scale_init
         self.update_feats     = update_feats
         self.update_coors     = update_coors
+        self.update_orients   = update_orients
         self.dropout          = dropout
         self.coor_weights_clamp_value = coor_weights_clamp_value
         self.recalc           = recalc

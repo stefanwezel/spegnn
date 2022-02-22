@@ -81,7 +81,6 @@ class SuperpixelImgDataset(torch.utils.data.Dataset):
                 )
 
 
-
         return dict(
                 img=img_rgb,
                 centers=[meta_data[node]['center'] for node in meta_data.keys()],
@@ -214,59 +213,59 @@ file_names = []
 
 
 
-# for i, sample in enumerate(mnist_test):
-#     if i < 1000:
-#         img_name = f"./graph_mnist/test_imgs/mnist_{6000+i:05d}.npy"
-#         np.save(img_name, sample['img'])
-#         file_names.append(img_name)
-#         lens = [len(sample[key]) for key in ['centers', 'colors', 'invariants', 'is_darkers', 'highest_contrast_neighbors', 'highest_contrast_neighbor_locs', 'highest_contrast_neighbor_colors', 'highest_contrast_neighbor_invariants', 'angle_betweens', 'center_betweens']]
-#         assert len(set(lens)) == 1 # check whether all elements have same lengths
-#         # print(lens)
-#         # len(set(input_list))! =1:
-#         centers.append(sample['centers'])
-#         colors.append(sample['colors'])
-#         invariants.append(sample['invariants'])
-#         is_darkers.append(sample['is_darkers'])
-#         highest_contrast_neighbors.append(sample['highest_contrast_neighbors'])
-#         highest_contrast_neighbor_locs.append(sample['highest_contrast_neighbor_locs'])
-#         highest_contrast_neighbor_colors.append(sample['highest_contrast_neighbor_colors'])
-#         highest_contrast_neighbor_invariants.append(sample['highest_contrast_neighbor_invariants'])
-#         angle_betweens.append(sample['angle_betweens'])
-#         center_betweens.append(sample['center_betweens'])
-#         targets.append(sample['target'])
-#         img_paths.append(img_name)
-#         is_trains.append(0)
+for i, sample in enumerate(mnist_test):
+    if i < 1000:
+        img_name = f"./graph_mnist/test_imgs/mnist_{6000+i:05d}.npy"
+        np.save(img_name, sample['img'])
+        file_names.append(img_name)
+        lens = [len(sample[key]) for key in ['centers', 'colors', 'invariants', 'is_darkers', 'highest_contrast_neighbors', 'highest_contrast_neighbor_locs', 'highest_contrast_neighbor_colors', 'highest_contrast_neighbor_invariants', 'angle_betweens', 'center_betweens']]
+        assert len(set(lens)) == 1 # check whether all elements have same lengths
+        # print(lens)
+        # len(set(input_list))! =1:
+        centers.append(sample['centers'])
+        colors.append(sample['colors'])
+        invariants.append(sample['invariants'])
+        is_darkers.append(sample['is_darkers'])
+        highest_contrast_neighbors.append(sample['highest_contrast_neighbors'])
+        highest_contrast_neighbor_locs.append(sample['highest_contrast_neighbor_locs'])
+        highest_contrast_neighbor_colors.append(sample['highest_contrast_neighbor_colors'])
+        highest_contrast_neighbor_invariants.append(sample['highest_contrast_neighbor_invariants'])
+        angle_betweens.append(sample['angle_betweens'])
+        center_betweens.append(sample['center_betweens'])
+        targets.append(sample['target'])
+        img_paths.append(img_name)
+        is_trains.append(0)
 
 
-#     else:
-#         break
+    else:
+        break
 
 
 
-# data = dict(
-#     center=centers,
-#     color=colors,
-#     invariants=invariants,
-#     is_darker=is_darkers,
-#     highest_contrast_neighbor=highest_contrast_neighbors,
-#     highest_contrast_neighbor_loc=highest_contrast_neighbor_locs,
-#     highest_contrast_neighbor_color=highest_contrast_neighbor_colors,
-#     highest_contrast_neighbor_invariants=highest_contrast_neighbor_invariants,
-#     angle_between=angle_betweens,
-#     sin=[np.sin(np.radians(angle)) for angle in angle_betweens],
-#     cos=[np.cos(np.radians(angle)) for angle in angle_betweens],
-#     center_between=center_betweens,
-#     targets=targets,
-#     img_paths=img_paths,
-#     is_train=is_trains,
-#     file_name=file_names,
-#     )
+data = dict(
+    center=centers,
+    color=colors,
+    invariants=invariants,
+    is_darker=is_darkers,
+    highest_contrast_neighbor=highest_contrast_neighbors,
+    highest_contrast_neighbor_loc=highest_contrast_neighbor_locs,
+    highest_contrast_neighbor_color=highest_contrast_neighbor_colors,
+    highest_contrast_neighbor_invariants=highest_contrast_neighbor_invariants,
+    angle_between=angle_betweens,
+    sin=[np.sin(np.radians(angle)) for angle in angle_betweens],
+    cos=[np.cos(np.radians(angle)) for angle in angle_betweens],
+    center_between=center_betweens,
+    targets=targets,
+    img_paths=img_paths,
+    is_train=is_trains,
+    file_name=file_names,
+    )
 
 
 
     
-# with open("./graph_mnist/test_data.pickle", "wb") as fp:
-#     pickle.dump(data, fp)
+with open("./graph_mnist/test_data.pickle", "wb") as fp:
+    pickle.dump(data, fp)
 
 
 

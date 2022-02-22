@@ -33,6 +33,7 @@ model = EGNN_Sparse_Network(
                     # feats_dim=10,
                     pos_dim=2,
                     orient_dim=1,
+                    edge_attr_dim=1, # for using rel_orient_dist as edge_attr
                     m_dim=16,
                     # embedding_nums=[5],
                     # embedding_dims=[10],

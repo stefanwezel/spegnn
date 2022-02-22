@@ -196,8 +196,8 @@ if __name__ == '__main__':
     graph_mnist_train = GraphMNIST()
     graph_mnist_test = GraphMNIST(is_train=False)
 
-    graph_trainloader = torch.utils.data.DataLoader(graph_mnist_train, batch_size=1, shuffle=True, collate_fn=collate_graph)
-    graph_testloader = torch.utils.data.DataLoader(graph_mnist_test, batch_size=1, shuffle=False, collate_fn=collate_graph)
+    graph_trainloader = torch.utils.data.DataLoader(graph_mnist_train, batch_size=64, shuffle=True, collate_fn=collate_graph)
+    graph_testloader = torch.utils.data.DataLoader(graph_mnist_test, batch_size=64, shuffle=False, collate_fn=collate_graph)
 
 
     graph_sample = next(iter(graph_trainloader))
@@ -291,11 +291,10 @@ if __name__ == '__main__':
 
     # n_feat = feats.size(1)
 
-    # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     model = EGNN(
-        in_node_nf=1, # 9
+        in_node_nf= 11,
         hidden_nf=100,
         out_node_nf=10,
         in_edge_nf=0,
@@ -314,24 +313,26 @@ if __name__ == '__main__':
     # optimizer = torch.optim.Adam(model.parameters(),lr=1e-2)
 
 
-    # for epoch in range(5):
+    for epoch in range(5):
     #     pbar = tqdm(total=len(graph_trainloader),position=0, leave=True)
-    #     for _, subsample in enumerate(graph_trainloader):
-    #         feats = graph_sample['feats']
-    #         edges = graph_sample['edges']
-    #         coords = graph_sample['locations']
-    #         n_nodes = graph_sample['n_nodes']
-    #         batch_size = graph_sample['batch_size']
-    #         target = graph_sample['target']
+        for _, subsample in enumerate(graph_trainloader):
+            feats = graph_sample['feats']
+            edges = graph_sample['edges']
+            coords = graph_sample['locations']
+            n_nodes = graph_sample['n_nodes']
+            batch_size = graph_sample['batch_size']
+            target = graph_sample['target']
 
-    #         # n_feat = feats.size(1)
-
-    #         for e in range(len(edges)):
-    #             edges[e] = edges[e].to(device)
-    #         feats, coords, target = feats.to(device), coords.to(device), target.to(device)
-    #         out_feats,out_coords=model(feats, coords, edges, edge_attr=None)
-    #         scores = out_feats.view(batch_size,n_nodes,-1).mean(1)
-
+            n_feat = feats.size(1)
+            # for e in range(len(edges)):
+            #     edges[e] = edges[e].to(device)
+            # feats, coords, target = feats.to(device), coords.to(device), target.to(device)
+            out_feats,out_coords=model(feats, coords, edges, edge_attr=None)
+            scores = out_feats.view(batch_size,n_nodes,-1).mean(1)
+            print(out_feats.size(0)/batch_size)
+            print(n_nodes)
+            print(n_nodes*batch_size)
+            print(out_feats.size())
     #         loss = loss_function(scores,target)
     #         optimizer.zero_grad()
     #         loss.backward()
