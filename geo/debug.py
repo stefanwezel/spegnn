@@ -17,29 +17,33 @@ from egnn_pytorch_geometric import *
 
 from graph_mnist import GraphMNIST
 
+torch.manual_seed(0)
 
 
-# layer = EGNN_Sparse(feats_dim=10,
+model = Baseline_EGNN_Sparse_Network(
+                    n_layers =3,
+                    # feats_dim=8,
+                    feats_dim=10,
+                    pos_dim=2,
+                    # edge_attr_dim=0, # for using rel_orient_dist as edge_attr
+                    m_dim=16,
+                    )
+# model = EGNN_Sparse_Network(
+#                     n_layers =3,
+#                     # feats_dim=8,
+#                     # feats_dim=9,
+#                     feats_dim = 11,
 #                     pos_dim=2,
-#                     orient_dim=2,
-#                     # edge_attr_dim=4,
+#                     orient_dim=1,
+#                     # edge_attr_dim=1, # for using rel_orient_dist as edge_attr
+#                     edge_attr_dim=2, # updated version
 #                     m_dim=16,
-#                     # fourier_features=4
 #                     )
 
-model = EGNN_Sparse_Network(
-                    n_layers =3,
-                    feats_dim=8,
-                    # feats_dim=10,
-                    pos_dim=2,
-                    orient_dim=1,
-                    edge_attr_dim=1, # for using rel_orient_dist as edge_attr
-                    m_dim=16,
-                    # embedding_nums=[5],
-                    # embedding_dims=[10],
-                    # edge_embedding_nums=[5], 
-                    # edge_embedding_dims=[10],
-                    )
+
+
+
+
 
 
 
@@ -54,10 +58,11 @@ datum = next(iter(train_loader))
 # print(layer.forward(datum.x, datum.edge_index, edge_attr=None))
 
 # print(datum.x[.size())
-# optimizer = torch.optim.Adam(model.parameters(),lr=1e-5)
+# optimizer = torch.optim.Adam(model.parameters(),lr=1e-6)
 # optimizer = torch.optim.Adam(model.parameters(),lr=1e-4)
-
 optimizer = torch.optim.Adam(model.parameters(),lr=1e-3)
+# optimizer = torch.optim.Adam(model.parameters(),lr=1e-2)
+
 loss_function = torch.nn.CrossEntropyLoss()
 
 
@@ -71,7 +76,6 @@ for epoch in range(15):
         out_feats = model(subsample.x, subsample.edge_index, subsample.batch, None, bsize=batch_size)
         n_nodes = out_feats.size(0)
         scores = out_feats.view(batch_size,n_nodes,-1).mean(1)
-        # scores = F.softmax(out_feats.view(batch_size,n_nodes,-1).mean(1), dim=1)
         loss = loss_function(scores,subsample.y)
         # if i % 250 == 0:
         #   print(loss.item())
@@ -80,8 +84,10 @@ for epoch in range(15):
         loss.backward()
         optimizer.step()
 
-    optimizer.param_groups[0]['lr'] *= 0.9
-    print(f"Training loss for epoch {epoch}: {epoch_training_loss / len(train_loader):.2f}")
+    # optimizer.param_groups[0]['lr'] *= 0.9
+    optimizer.param_groups[0]['lr'] *= 0.95
+    # optimizer.param_groups[0]['lr'] *= 0.99
+    print(f"Training loss for epoch {epoch+1}: {epoch_training_loss / len(train_loader):.2f}")
 
     # evaluation loop
     model.eval()
@@ -95,4 +101,4 @@ for epoch in range(15):
             total_correct += (predicted == subsample.y).sum().item()
 
     accuracy = (100 * total_correct) / (len(test_loader)*batch_size)
-    print(f"Evaluation accuracy for epoch {epoch}: {accuracy:.2f} percent.")
+    print(f"Evaluation accuracy for epoch {epoch+1}: {accuracy:.2f} percent.")
