@@ -26,6 +26,7 @@ except:
     Tensor = object
 
 from egnn_pytorch import *
+from torch_geometric.nn import MLP, DynamicEdgeConv, global_max_pool
 
 
 
@@ -978,17 +979,21 @@ class EGNN_Sparse_Network(nn.Module):
         # #########################
         self.classifier = torch.nn.Sequential(
                             torch.nn.LazyLinear(20),
-                            torch.nn.ReLU(),
+                            torch.nn.Dropout(0.2),
+                            SiLU(),
                             torch.nn.LazyLinear(20),
-                            torch.nn.ReLU(),
+                            torch.nn.Dropout(0.2),
+                            SiLU(),
                             torch.nn.LazyLinear(10),
                     )
 
-        self.local_classifier = torch.nn.Sequential(
+        self.process_nodes = torch.nn.Sequential(
                             torch.nn.LazyLinear(20),
-                            torch.nn.ReLU(),
+                            torch.nn.Dropout(0.2),
+                            SiLU(),
                             torch.nn.LazyLinear(40),
-                            torch.nn.ReLU(),
+                            torch.nn.Dropout(0.2),
+                            SiLU(),
                             torch.nn.LazyLinear(25),
             )
 
@@ -1037,31 +1042,19 @@ class EGNN_Sparse_Network(nn.Module):
             
 
         max_node = (x.max(dim=0)[0]).unsqueeze(0)
-        mean_nodes = x.mean(dim=0).unsqueeze(0)
 
-        # x = torch.cat([node for node in x[:]], dim=0)
-
-        shared_output = torch.zeros(25)
-
-
-        # processed_local_features = torch.zeros(x.size(0), 25)
+        processed_local_features = torch.zeros(x.size(0), 25)
 
 
         for i, node in enumerate(x[:]):
-            # print(node.size())
-            # processed_local_features[i] = self.local_classifier(node)
-            shared_output += self.local_classifier(node)
+            processed_local_features[i] = self.process_nodes(node)
 
-        # global_feature = processed_local_features.max(dim=0)[0]
+        global_feature = global_max_pool(processed_local_features, batch)
 
-        x = torch.cat([max_node, mean_nodes, shared_output.unsqueeze(0)], dim=1)
-        # print(x.unsqueeze(0).size())
-        # print(x.size())
-        # print(x.unsqueeze(0).size())
-        # x = self.classifier(x.unsqueeze(0))#.squeeze(0)
+        x = torch.cat([max_node, global_feature], dim=1)
+
         x = self.classifier(x)#.squeeze(0)
 
-        # print(x.size())
         return x
 
     def __repr__(self):
