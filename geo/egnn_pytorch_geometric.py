@@ -575,19 +575,27 @@ class EGNN_Sparse(MessagePassing):
         self.dropout = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
 
-        # self.complex_dist = lambda a,b: torch.sqrt((b.real - a.real)**2 + (b.imag - a.imag)**2)
-        # self.complex_dist = lambda rel: torch.sqrt((rel.real)**2 + (rel.imag)**2)
-        # self.orient_dist2norm = lambda alpha: torch.sqrt(alpha[:,0]**2 + alpha[:,1]**2).unsqueeze(-1)
-
         # EDGES
+        # self.edge_mlp = nn.Sequential(
+        #     nn.Linear(self.edge_input_dim, self.edge_input_dim * 2),
+        #     self.dropout,
+        #     SiLU(),
+        #     nn.Linear(self.edge_input_dim * 2, m_dim),
+        #     SiLU()
+        # )
         self.edge_mlp = nn.Sequential(
-            nn.Linear(self.edge_input_dim, self.edge_input_dim * 2),
+            nn.Linear(self.edge_input_dim, self.edge_input_dim * 10),
             self.dropout,
             SiLU(),
-            nn.Linear(self.edge_input_dim * 2, m_dim),
+            nn.Linear(self.edge_input_dim*10, self.edge_input_dim * 30),
+            self.dropout,
+            SiLU(),
+            nn.Linear(self.edge_input_dim* 30, self.edge_input_dim * 10),
+            self.dropout,
+            SiLU(),
+            nn.Linear(self.edge_input_dim * 10, m_dim),
             SiLU()
         )
-
         self.edge_weight = nn.Sequential(nn.Linear(m_dim, 1), 
                                          nn.Sigmoid()
         ) if soft_edge else None
@@ -596,28 +604,61 @@ class EGNN_Sparse(MessagePassing):
         self.node_norm = torch_geometric.nn.norm.LayerNorm(feats_dim) if norm_feats else None
         self.coors_norm = CoorsNorm(scale_init = norm_coors_scale_init) if norm_coors else nn.Identity()
 
+
         self.node_mlp = nn.Sequential(
-            nn.Linear(feats_dim + m_dim, feats_dim * 2),
+            nn.Linear(feats_dim + m_dim, feats_dim * 10),
             self.dropout,
             SiLU(),
-            nn.Linear(feats_dim * 2, feats_dim),
+            nn.Linear(feats_dim*10, feats_dim * 30),
+            self.dropout,
+            SiLU(),
+            nn.Linear(feats_dim*30, feats_dim * 10),
+            self.dropout,
+            SiLU(),
+            nn.Linear(feats_dim * 10, feats_dim),
         ) if update_feats else None
+
+        # self.node_mlp = nn.Sequential(
+        #     nn.Linear(feats_dim + m_dim, feats_dim * 2),
+        #     self.dropout,
+        #     SiLU(),
+        #     nn.Linear(feats_dim * 2, feats_dim),
+        # ) if update_feats else None
 
         # COORS
         self.coors_mlp = nn.Sequential(
-            nn.Linear(m_dim, m_dim * 4),
+            nn.Linear(m_dim, m_dim * 10),
             self.dropout,
             SiLU(),
-            nn.Linear(self.m_dim * 4, 1)
+            nn.Linear(m_dim*10, m_dim * 30),
+            self.dropout,
+            SiLU(),
+            nn.Linear(m_dim * 30, m_dim * 10),
+            self.dropout,
+            SiLU(),
+            nn.Linear(self.m_dim * 10, 1)
         ) if update_coors else None
 
         self.orients_mlp = nn.Sequential(
-            nn.Linear(m_dim, m_dim * 4),
+            nn.Linear(m_dim, m_dim * 32),
             self.dropout,
             SiLU(),
-            nn.Linear(self.m_dim * 4, 1)
+            nn.Linear(self.m_dim * 32, 1)
         ) if update_orients else None
+        # # COORS
+        # self.coors_mlp = nn.Sequential(
+        #     nn.Linear(m_dim, m_dim * 4),
+        #     self.dropout,
+        #     SiLU(),
+        #     nn.Linear(self.m_dim * 4, 1)
+        # ) if update_coors else None
 
+        # self.orients_mlp = nn.Sequential(
+        #     nn.Linear(m_dim, m_dim * 4),
+        #     self.dropout,
+        #     SiLU(),
+        #     nn.Linear(self.m_dim * 4, 1)
+        # ) if update_orients else None
 
 
         self.apply(self.init_)
@@ -871,15 +912,15 @@ class EGNN_Sparse_Network(nn.Module):
 
         # instantiate point and edge embedding layers
 
-        for i in range( len(self.embedding_dims) ):
-            self.emb_layers.append(nn.Embedding(num_embeddings = embedding_nums[i],
-                                                embedding_dim  = embedding_dims[i]))
-            feats_dim += embedding_dims[i] - 1
+        # for i in range( len(self.embedding_dims) ):
+        #     self.emb_layers.append(nn.Embedding(num_embeddings = embedding_nums[i],
+        #                                         embedding_dim  = embedding_dims[i]))
+        #     feats_dim += embedding_dims[i] - 1
 
-        for i in range( len(self.edge_embedding_dims) ):
-            self.edge_emb_layers.append(nn.Embedding(num_embeddings = edge_embedding_nums[i],
-                                                     embedding_dim  = edge_embedding_dims[i]))
-            edge_attr_dim += edge_embedding_dims[i] - 1
+        # for i in range( len(self.edge_embedding_dims) ):
+        #     self.edge_emb_layers.append(nn.Embedding(num_embeddings = edge_embedding_nums[i],
+        #                                              embedding_dim  = edge_embedding_dims[i]))
+        #     edge_attr_dim += edge_embedding_dims[i] - 1
         # rest
         self.mpnn_layers      = nn.ModuleList()
         self.feats_dim        = feats_dim
@@ -906,8 +947,11 @@ class EGNN_Sparse_Network(nn.Module):
             self.global_tokens = nn.Parameter(torch.randn(num_global_tokens, dim))
         
         # instantiate layers
+        layer_size_multiplicators = [1,1,1]
+
+
         for i in range(n_layers):
-            layer = EGNN_Sparse(feats_dim = feats_dim,
+            layer = EGNN_Sparse(feats_dim = feats_dim*layer_size_multiplicators[i],
                                 pos_dim = pos_dim,
                                 orient_dim = orient_dim,
                                 edge_attr_dim = edge_attr_dim,
@@ -932,6 +976,15 @@ class EGNN_Sparse_Network(nn.Module):
             # normal case
             else: 
                 self.mpnn_layers.append(layer)
+
+
+        # #########################
+        self.classifier = torch.nn.Sequential(
+                            torch.nn.LazyLinear(20),
+                            torch.nn.ReLU(),
+                            torch.nn.LazyLinear(10),
+                    )
+        # #########################
             
 
     def forward(self, x, edge_index, batch, edge_attr,
@@ -961,34 +1014,38 @@ class EGNN_Sparse_Network(nn.Module):
         for i,layer in enumerate(self.mpnn_layers):
             
             # EDGES - Embedd each dim to its target dimensions:
-            if edges_need_embedding:
-                edge_attr = embedd_token(edge_attr, self.edge_embedding_dims, self.edge_emb_layers)
-                edges_need_embedding = False
+            # if edges_need_embedding:
+            #     edge_attr = embedd_token(edge_attr, self.edge_embedding_dims, self.edge_emb_layers)
+            #     edges_need_embedding = False
+            #     print('---------')
 
             # attn tokens
             global_tokens = None
-            if exists(self.global_tokens):
-                unique, amounts = torch.unique(batch, return_counts)
-                num_idxs = torch.cat([torch.arange(num_idxs_i) for num_idxs_i in amounts], dim=-1)
-                global_tokens = self.global_tokens[num_idxs]
+            # if exists(self.global_tokens):
+            #     unique, amounts = torch.unique(batch, return_counts)
+            #     num_idxs = torch.cat([torch.arange(num_idxs_i) for num_idxs_i in amounts], dim=-1)
+            #     global_tokens = self.global_tokens[num_idxs]
 
             # pass layers
             is_global_layer = self.has_global_attn and (i % self.global_linear_attn_every) == 0
             if not is_global_layer:
                 x = layer(x, edge_index, edge_attr, batch=batch, size=bsize)
-
-            else: 
-                # only pass feats to the attn layer
-                x_attn = layer[0](x[:, self.pos_dim:], global_tokens)
-                # merge attn-ed feats and coords
-                x = torch.cat( (x[:, :self.pos_dim], x_attn), dim=-1)
-                x = layer[-1](x, edge_index, edge_attr, batch=batch, size=bsize)
+            # else: 
+            #     # only pass feats to the attn layer
+            #     x_attn = layer[0](x[:, self.pos_dim:], global_tokens)
+            #     # merge attn-ed feats and coords
+            #     x = torch.cat( (x[:, :self.pos_dim], x_attn), dim=-1)
+            #     x = layer[-1](x, edge_index, edge_attr, batch=batch, size=bsize)
 
             # recalculate edge info - not needed if last layer
             if self.recalc and ((i%self.recalc == 0) and not (i == len(self.mpnn_layers)-1)) :
                 edge_index, edge_attr, _ = recalc_edge(x) # returns attr, idx, any_other_info
                 edges_need_embedding = True
             
+        
+
+        # x = self.classifier(x)
+
         return x
 
     def __repr__(self):

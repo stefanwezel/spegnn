@@ -20,27 +20,28 @@ from graph_mnist import GraphMNIST
 torch.manual_seed(0)
 
 
-model = Baseline_EGNN_Sparse_Network(
-                    n_layers =3,
-                    # feats_dim=8,
-                    feats_dim=10,
-                    pos_dim=2,
-                    # edge_attr_dim=0, # for using rel_orient_dist as edge_attr
-                    m_dim=16,
-                    )
-# model = EGNN_Sparse_Network(
+# model = Baseline_EGNN_Sparse_Network(
 #                     n_layers =3,
 #                     # feats_dim=8,
-#                     # feats_dim=9,
-#                     feats_dim = 11,
+#                     feats_dim=10,
 #                     pos_dim=2,
-#                     orient_dim=1,
-#                     # edge_attr_dim=1, # for using rel_orient_dist as edge_attr
-#                     edge_attr_dim=2, # updated version
+#                     update_coors=False,
+#                     # edge_attr_dim=0, # for using rel_orient_dist as edge_attr
 #                     m_dim=16,
-#                     )
 
 
+model = EGNN_Sparse_Network(
+                    n_layers =1,
+                    # feats_dim=8,
+                    # feats_dim=9,
+                    feats_dim = 11,
+                    pos_dim=2,
+                    orient_dim=1,
+                    update_coors=True,
+                    # edge_attr_dim=1, # for using rel_orient_dist as edge_attr
+                    edge_attr_dim=2, # updated version
+                    m_dim=16,
+                    )
 
 
 
@@ -59,6 +60,7 @@ datum = next(iter(train_loader))
 
 # print(datum.x[.size())
 # optimizer = torch.optim.Adam(model.parameters(),lr=1e-6)
+# optimizer = torch.optim.Adam(model.parameters(),lr=1e-5)
 # optimizer = torch.optim.Adam(model.parameters(),lr=1e-4)
 optimizer = torch.optim.Adam(model.parameters(),lr=1e-3)
 # optimizer = torch.optim.Adam(model.parameters(),lr=1e-2)
@@ -75,6 +77,8 @@ for epoch in range(15):
         optimizer.zero_grad()
         out_feats = model(subsample.x, subsample.edge_index, subsample.batch, None, bsize=batch_size)
         n_nodes = out_feats.size(0)
+        # print(out_feats.size())
+        # print(n_nodes)
         scores = out_feats.view(batch_size,n_nodes,-1).mean(1)
         loss = loss_function(scores,subsample.y)
         # if i % 250 == 0:
@@ -84,6 +88,7 @@ for epoch in range(15):
         loss.backward()
         optimizer.step()
 
+    # optimizer.param_groups[0]['lr'] *= 0.8
     # optimizer.param_groups[0]['lr'] *= 0.9
     optimizer.param_groups[0]['lr'] *= 0.95
     # optimizer.param_groups[0]['lr'] *= 0.99
