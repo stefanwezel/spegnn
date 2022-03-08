@@ -525,7 +525,516 @@ class Baseline_EGNN_Sparse_Network(nn.Module):
 
 
 
-# define pytorch-geometric equivalents
+# # define pytorch-geometric equivalents
+# class EGNN_Sparse(MessagePassing):
+#     """ Different from the above since it separates the edge assignment
+#         from the computation (this allows for great reduction in time and 
+#         computations when the graph is locally or sparse connected).
+#         * aggr: one of ["add", "mean", "max"]
+#     """
+#     def __init__(
+#         self,
+#         feats_dim,
+#         pos_dim=3,
+#         orient_dim=1,
+#         edge_attr_dim = 0,
+#         m_dim = 16,
+#         fourier_features = 0,
+#         soft_edge = 0,
+#         norm_feats = False,
+#         norm_coors = False,
+#         norm_coors_scale_init = 1e-2,
+#         update_feats = True,
+#         update_coors = True,
+#         update_orients=True,
+#         dropout = 0.,
+#         coor_weights_clamp_value = None, 
+#         aggr = "add",
+#         **kwargs
+#     ):
+#         assert aggr in {'add', 'sum', 'max', 'mean'}, 'pool method must be a valid option'
+#         assert update_feats or update_coors, 'you must update either features, coordinates, or both'
+#         kwargs.setdefault('aggr', aggr)
+#         super(EGNN_Sparse, self).__init__(**kwargs)
+#         # model params
+#         self.fourier_features = fourier_features
+#         self.feats_dim = feats_dim
+#         self.pos_dim = pos_dim
+#         self.orient_dim = orient_dim
+#         self.m_dim = m_dim
+#         self.soft_edge = soft_edge
+#         self.norm_feats = norm_feats
+#         self.norm_coors = norm_coors
+#         self.update_coors = update_coors
+#         self.update_orients = update_orients
+#         self.update_feats = update_feats
+#         self.coor_weights_clamp_value = None
+
+#         self.edge_input_dim = (fourier_features * 2) + edge_attr_dim + 1 + (feats_dim * 2)
+#         self.dropout = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
+
+
+#         # EDGES
+#         # self.edge_mlp = nn.Sequential(
+#         #     nn.Linear(self.edge_input_dim, self.edge_input_dim * 2),
+#         #     self.dropout,
+#         #     SiLU(),
+#         #     nn.Linear(self.edge_input_dim * 2, m_dim),
+#         #     SiLU()
+#         # )
+#         self.edge_mlp = nn.Sequential(
+#             nn.Linear(self.edge_input_dim, self.edge_input_dim * 10),
+#             self.dropout,
+#             SiLU(),
+#             nn.Linear(self.edge_input_dim*10, self.edge_input_dim * 20),
+#             self.dropout,
+#             SiLU(),
+#             nn.Linear(self.edge_input_dim * 20, self.edge_input_dim * 10),
+#             self.dropout,
+#             SiLU(),
+#             nn.Linear(self.edge_input_dim * 10, m_dim),
+#             SiLU()
+#         )
+#         self.edge_weight = nn.Sequential(nn.Linear(m_dim, 1), 
+#                                          nn.Sigmoid()
+#         ) if soft_edge else None
+
+#         # NODES - can't do identity in node_norm bc pyg expects 2 inputs, but identity expects 1. 
+#         self.node_norm = torch_geometric.nn.norm.LayerNorm(feats_dim) if norm_feats else None
+#         self.coors_norm = CoorsNorm(scale_init = norm_coors_scale_init) if norm_coors else nn.Identity()
+
+
+#         self.node_mlp = nn.Sequential(
+#             nn.Linear(feats_dim + m_dim, feats_dim * 10),
+#             self.dropout,
+#             SiLU(),
+#             nn.Linear(feats_dim*10, feats_dim * 20),
+#             self.dropout,
+#             SiLU(),
+#             nn.Linear(feats_dim * 20, feats_dim * 10),
+#             self.dropout,
+#             SiLU(),
+#             nn.Linear(feats_dim * 10, feats_dim),
+#         ) if update_feats else None
+
+#         # self.node_mlp = nn.Sequential(
+#         #     nn.Linear(feats_dim + m_dim, feats_dim * 2),
+#         #     self.dropout,
+#         #     SiLU(),
+#         #     nn.Linear(feats_dim * 2, feats_dim),
+#         # ) if update_feats else None
+
+#         # COORS
+#         self.coors_mlp = nn.Sequential(
+#             nn.Linear(m_dim, m_dim * 10),
+#             self.dropout,
+#             SiLU(),
+#             nn.Linear(m_dim*10, m_dim * 20),
+#             self.dropout,
+#             SiLU(),
+#             nn.Linear(m_dim * 20, m_dim * 10),
+#             self.dropout,
+#             SiLU(),
+#             nn.Linear(self.m_dim * 10, 1)
+#         ) if update_coors else None
+
+#         self.orients_mlp = nn.Sequential(
+#             nn.Linear(m_dim, m_dim * 32),
+#             self.dropout,
+#             SiLU(),
+#             nn.Linear(self.m_dim * 32, 1)
+#         ) if update_orients else None
+#         # # COORS
+#         # self.coors_mlp = nn.Sequential(
+#         #     nn.Linear(m_dim, m_dim * 4),
+#         #     self.dropout,
+#         #     SiLU(),
+#         #     nn.Linear(self.m_dim * 4, 1)
+#         # ) if update_coors else None
+
+#         # self.orients_mlp = nn.Sequential(
+#         #     nn.Linear(m_dim, m_dim * 4),
+#         #     self.dropout,
+#         #     SiLU(),
+#         #     nn.Linear(self.m_dim * 4, 1)
+#         # ) if update_orients else None
+
+
+#         self.apply(self.init_)
+
+#     def init_(self, module):
+#         if type(module) in {nn.Linear}:
+#             # seems to be needed to keep the network from exploding to NaN with greater depths
+#             nn.init.xavier_normal_(module.weight)
+#             nn.init.zeros_(module.bias)
+
+#     def forward(self, x: Tensor, edge_index: Adj,
+#                 edge_attr: OptTensor = None, batch: Adj = None, 
+#                 angle_data: List = None,  size: Size = None) -> Tensor:
+#         """ Inputs: 
+#             * x: (n_points, d) where d is pos_dims + feat_dims
+#             * edge_index: (n_edges, 2) # (more like the other way round)
+#             * edge_attr: tensor (n_edges, n_feats) excluding basic distance feats.
+#             * batch: (n_points,) long tensor. specifies xloud belonging for each point
+#             * angle_data: list of tensors (levels, n_edges_i, n_length_path) long tensor.
+#             * size: None
+#         """
+#         # coors, feats = x[:, :self.pos_dim], x[:, self.pos_dim+2:] # legacy
+#         coors = x[:, :self.pos_dim]
+#         orient = x[:, self.pos_dim:self.pos_dim+self.orient_dim]
+#         # orient_feats = torch.sin(orient)
+#         # feats = x[:, self.pos_dim+self.orient_dim:]
+#         feats = x[:, self.pos_dim:]
+
+#         # feats = torch.cat([orient_feats, feats], dim=-1)
+
+#         # normalize coords into range between -1 and 1
+#         coors = normalize(coors)
+
+#         rel_coors = coors[edge_index[0]] - coors[edge_index[1]]
+#         rel_dist  = (rel_coors ** 2).sum(dim=-1, keepdim=True)
+
+#         # # relative angle (subtract angle)
+#         # cartesian_i = torch.polar(
+#         #         torch.ones_like(orient[edge_index[0]]), # on unit-circle 
+#         #         torch.deg2rad(orient[edge_index[0]])
+#         #         )
+#         # cartesian_j = torch.polar(
+#         #         torch.ones_like(orient[edge_index[1]]), # on unit-circle
+#         #         torch.deg2rad(orient[edge_index[1]])
+#         #         )
+
+#         # sin = torch.sin(
+#         #     # torch.deg2rad(
+#         #         orient[edge_index[0]] - orient[edge_index[1]]
+#         #         # )
+#         #     )
+#         # cos = torch.cos(
+#         #     # torch.deg2rad(
+#         #         orient[edge_index[0]] - orient[edge_index[1]]
+#         #         # )
+#         #     )
+#         rel_sin = torch.sin(
+#                 orient[edge_index[0]] - orient[edge_index[1]]
+#             )
+#         rel_cos = torch.cos(
+#                 orient[edge_index[0]] - orient[edge_index[1]]
+#             )
+
+
+
+
+#         rel_orients = torch.cat((rel_sin, rel_cos), dim=-1)
+
+
+
+#         # compute sin and cosine and use as features
+#         if self.fourier_features > 0:
+#             rel_dist = fourier_encode_dist(rel_dist, num_encodings = self.fourier_features)
+#             rel_dist = rearrange(rel_dist, 'n () d -> n d')
+
+#         if exists(edge_attr):
+#             edge_attr_feats = torch.cat([edge_attr, rel_dist], dim=-1)
+#         else:
+#             # edge_attr_feats = rel_dist
+#             # edge_attr_feats = torch.cat([rel_dist, rel_orient_dist], dim=-1)
+#             edge_attr_feats = torch.cat([rel_dist, rel_sin, rel_cos], dim=-1)
+
+
+#         hidden_out, coors_out = self.propagate(edge_index, x=feats, edge_attr=edge_attr_feats,
+#                                                            coors=coors, rel_coors=rel_coors,
+#                                                            orients=orient, rel_orients=rel_orients,
+#                                                            batch=batch)
+
+
+#         x_new =torch.cat([coors_out, hidden_out], dim=-1) # legacy
+#         # x_new =torch.cat([coors_out, orient, hidden_out], dim=-1)
+
+
+#         return x_new
+
+
+#     def message(self, x_i, x_j, edge_attr) -> Tensor:
+#         m_ij = self.edge_mlp( torch.cat([x_i, x_j, edge_attr], dim=-1) )
+#         return m_ij
+
+#     def propagate(self, edge_index: Adj, size: Size = None, **kwargs):
+#         """The initial call to start propagating messages.
+#             Args:
+#             `edge_index` holds the indices of a general (sparse)
+#                 assignment matrix of shape :obj:`[N, M]`.
+#             size (tuple, optional) if none, the size will be inferred
+#                 and assumed to be quadratic.
+#             **kwargs: Any additional data which is needed to construct and
+#                 aggregate messages, and to update node embeddings.
+#         """
+#         size = self.__check_input__(edge_index, size)
+#         coll_dict = self.__collect__(self.__user_args__,
+#                                      edge_index, size, kwargs)
+#         msg_kwargs = self.inspector.distribute('message', coll_dict)
+#         aggr_kwargs = self.inspector.distribute('aggregate', coll_dict)
+#         update_kwargs = self.inspector.distribute('update', coll_dict)
+        
+
+#         # get messages
+#         # msg_kwargs = 'x_i', 'x_j', 'edge_attr'
+#         m_ij = self.message(**msg_kwargs)
+
+#         # update coors if specified
+#         if self.update_coors:
+#             coor_wij = self.coors_mlp(m_ij)
+#             # clamp if arg is set
+#             if self.coor_weights_clamp_value:
+#                 coor_weights_clamp_value = self.coor_weights_clamp_value
+#                 coor_weights.clamp_(min = -clamp_value, max = clamp_value)
+
+#             # normalize if needed
+#             kwargs["rel_coors"] = self.coors_norm(kwargs["rel_coors"])
+
+#             mhat_i = self.aggregate(coor_wij * kwargs["rel_coors"], **aggr_kwargs)
+#             coors_out = kwargs["coors"] + mhat_i
+#         else:
+#             coors_out = kwargs["coors"]
+
+
+#         # if self.update_orients:
+#         #     orient_wij = self.orients_mlp(m_ij)
+#         #     # if self.orient_weights_clamp_value:
+#         #     #     orient_weights_clamp_value = self.orient_weights_clamp_value
+#         #     #     orient_weights.clamp_(min = -clamp_value, max = clamp_value)
+#         #     kwargs['rel_orients'] = self.coors_norm(kwargs['rel_orients']) # SE3 Transformers norm
+#         #     nhat_i = self.aggregate(orient_wij * kwargs["rel_orients"], **aggr_kwargs)
+#         #     orients_out = kwargs['orients'] + nhat_i
+
+
+
+#         # update feats if specified
+#         if self.update_feats:
+#             # weight the edges if arg is passed
+#             if self.soft_edge:
+#                 m_ij = m_ij * self.edge_weight(m_ij)
+#             m_i = self.aggregate(m_ij, **aggr_kwargs)
+
+#             hidden_feats = self.node_norm(kwargs["x"], kwargs["batch"]) if self.node_norm else kwargs["x"]
+#             hidden_out = self.node_mlp( torch.cat([hidden_feats, m_i], dim = -1) )
+#             hidden_out = kwargs["x"] + hidden_out
+#         else: 
+#             hidden_out = kwargs["x"]
+
+#         # return tuple
+#         # print(type(self.update))
+#         return self.update((hidden_out, coors_out), **update_kwargs)
+
+#     def __repr__(self):
+#         dict_print = {}
+#         return "E(n)-GNN Layer for Graphs " + str(self.__dict__) 
+
+# class ClassificationLSTM(nn.Module):
+#     def __init__(self, input_size, hidden_size, num_layers, num_classes):
+#         super(ClassificationLSTM, self).__init__()
+#         self.l1 = nn.LSTM(input_size=input_size, hidden_size=hidden_size, num_layers=num_layers, batch_first=True)
+#         self.out = nn.Linear(hidden_size, num_classes)
+#     def forward(self, x):
+#         r_out, (h_n, h_c) = self.l1(x, None) #None represents zero initial hidden state
+#         out = self.out(r_out[:, -1, :])
+#         return out
+
+
+# class EGNN_Sparse_Network(nn.Module):
+#     r"""Sample GNN model architecture that uses the EGNN-Sparse
+#         message passing layer to learn over point clouds. 
+#         Main MPNN layer introduced in https://arxiv.org/abs/2102.09844v1
+
+#         Inputs will be standard GNN: x, edge_index, edge_attr, batch, ...
+
+#         Args:
+#         * n_layers: int. number of MPNN layers
+#         * ... : same interpretation as the base layer.
+#         * embedding_nums: list. number of unique keys to embedd. for points
+#                           1 entry per embedding needed. 
+#         * embedding_dims: list. point - number of dimensions of
+#                           the resulting embedding. 1 entry per embedding needed. 
+#         * edge_embedding_nums: list. number of unique keys to embedd. for edges.
+#                                1 entry per embedding needed. 
+#         * edge_embedding_dims: list. point - number of dimensions of
+#                                the resulting embedding. 1 entry per embedding needed. 
+#         * recalc: int. Recalculate edge feats every `recalc` MPNN layers. 0 for no recalc
+#         * verbose: bool. verbosity level.
+#         -----
+#         Diff with normal layer: one has to do preprocessing before (radius, global token, ...)
+#     """
+#     def __init__(self, n_layers, feats_dim, 
+#                  pos_dim = 3,
+#                  orient_dim = 2,
+#                  edge_attr_dim = 0, 
+#                  m_dim = 16,
+#                  fourier_features = 0, 
+#                  soft_edge = 0,
+#                  embedding_nums=[], 
+#                  embedding_dims=[],
+#                  edge_embedding_nums=[], 
+#                  edge_embedding_dims=[],
+#                  update_coors=True,
+#                  update_orients=True,
+#                  update_feats=True, 
+#                  norm_feats=True, 
+#                  norm_coors=False,
+#                  norm_coors_scale_init = 1e-2, 
+#                  dropout=0.,
+#                  coor_weights_clamp_value=None, 
+#                  aggr="add",
+#                  global_linear_attn_every = 0,
+#                  global_linear_attn_heads = 8,
+#                  global_linear_attn_dim_head = 64,
+#                  num_global_tokens = 4,
+#                  recalc=0 ,):
+#         super().__init__()
+
+#         self.n_layers         = n_layers 
+
+#         # Embeddings? solve here
+#         self.embedding_nums   = embedding_nums
+#         self.embedding_dims   = embedding_dims
+#         self.emb_layers       = nn.ModuleList()
+#         self.edge_embedding_nums = edge_embedding_nums
+#         self.edge_embedding_dims = edge_embedding_dims
+#         self.edge_emb_layers     = nn.ModuleList()
+
+#         # rest
+#         self.mpnn_layers      = nn.ModuleList()
+#         self.feats_dim        = feats_dim
+#         self.pos_dim          = pos_dim
+#         self.orient_dim       = orient_dim
+#         self.edge_attr_dim    = edge_attr_dim
+#         self.m_dim            = m_dim
+#         self.fourier_features = fourier_features
+#         self.soft_edge        = soft_edge
+#         self.norm_feats       = norm_feats
+#         self.norm_coors       = norm_coors
+#         self.norm_coors_scale_init = norm_coors_scale_init
+#         self.update_feats     = update_feats
+#         self.update_coors     = update_coors
+#         self.update_orients   = update_orients
+#         self.dropout          = dropout
+#         self.coor_weights_clamp_value = coor_weights_clamp_value
+#         self.recalc           = recalc
+
+#         self.has_global_attn = global_linear_attn_every > 0
+#         self.global_tokens = None
+#         self.global_linear_attn_every = global_linear_attn_every
+#         if self.has_global_attn:
+#             self.global_tokens = nn.Parameter(torch.randn(num_global_tokens, dim))
+        
+#         # instantiate layers
+#         layer_size_multiplicators = [1,1,1]
+
+
+#         for i in range(n_layers):
+#             layer = EGNN_Sparse(feats_dim = feats_dim*layer_size_multiplicators[i],
+#                                 pos_dim = pos_dim,
+#                                 orient_dim = orient_dim,
+#                                 edge_attr_dim = edge_attr_dim,
+#                                 m_dim = m_dim,
+#                                 fourier_features = fourier_features, 
+#                                 soft_edge = soft_edge, 
+#                                 norm_feats = norm_feats,
+#                                 norm_coors = norm_coors,
+#                                 norm_coors_scale_init = norm_coors_scale_init, 
+#                                 update_feats = update_feats,
+#                                 update_coors = update_coors, 
+#                                 dropout = dropout, 
+#                                 coor_weights_clamp_value = coor_weights_clamp_value)
+
+
+
+
+#             # global attention case
+#             is_global_layer = self.has_global_attn and (i % self.global_linear_attn_every) == 0
+#             if is_global_layer:
+#                 attn_layer = GlobalLinearAttention(dim = self.feats_dim, 
+#                                                    heads = global_linear_attn_heads, 
+#                                                    dim_head = global_linear_attn_dim_head)
+#                 self.mpnn_layers.append(nn.ModuleList([layer, attn_layer]))
+#             # normal case
+#             else: 
+#                 self.mpnn_layers.append(layer)
+
+
+#         # #########################
+#         self.classifier = torch.nn.Sequential(
+#                             torch.nn.LazyLinear(20),
+#                             torch.nn.Dropout(0.2),
+#                             SiLU(),
+#                             torch.nn.LazyLinear(20),
+#                             torch.nn.Dropout(0.2),
+#                             SiLU(),
+#                             torch.nn.LazyLinear(10),
+#                     )
+
+#         self.process_nodes = torch.nn.Sequential(
+#                             torch.nn.LazyLinear(20),
+#                             torch.nn.Dropout(0.2),
+#                             SiLU(),
+#                             torch.nn.LazyLinear(40),
+#                             torch.nn.Dropout(0.2),
+#                             SiLU(),
+#                             torch.nn.LazyLinear(25),
+#             )
+
+
+#         # self.classifier = ClassificationLSTM(13, 25, 5, 10)
+#         # #########################
+            
+
+#     def forward(self, x, edge_index, batch, edge_attr,
+#                 bsize=None, recalc_edge=None, verbose=0):
+#         """ Recalculate edge features every `self.recalc_edge` with the
+#             `recalc_edge` function if self.recalc_edge is set.
+
+#             * x: (N, pos_dim+feats_dim) will be unpacked into coors, feats.
+#         """
+#         # NODES - Embedd each dim to its target dimensions:
+#         x = embedd_token(x, self.embedding_dims, self.emb_layers)
+
+
+#         coors = x[:, :self.pos_dim]
+#         orients = x[:, self.pos_dim:self.pos_dim+self.orient_dim]
+#         orients = torch.deg2rad(orients)
+#         feats = x[:, self.pos_dim+self.orient_dim:]
+#         feats = torch.cat([torch.sin(orients), torch.cos(orients), feats], dim=-1)
+
+#         x = torch.cat([coors, orients, feats], dim=-1)
+
+
+
+#         # regulates wether to embedd edges each layer
+#         edges_need_embedding = False  
+#         for i,layer in enumerate(self.mpnn_layers):
+
+#             # pass layers
+#             is_global_layer = self.has_global_attn and (i % self.global_linear_attn_every) == 0
+#             if not is_global_layer:
+#                 x = layer(x, edge_index, edge_attr, batch=batch, size=bsize)
+
+
+#         max_node = (x.max(dim=0)[0]).unsqueeze(0)
+
+#         processed_local_features = torch.zeros(x.size(0), 25)
+
+
+#         for i, node in enumerate(x[:]):
+#             processed_local_features[i] = self.process_nodes(node)
+
+#         global_feature = global_max_pool(processed_local_features, batch)
+
+#         x = torch.cat([max_node, global_feature], dim=1)
+
+#         x = self.classifier(x)#.squeeze(0)
+
+#         return x
+
+#     def __repr__(self):
+#         return 'EGNN_Sparse_Network of: {0} layers'.format(len(self.mpnn_layers))
 class EGNN_Sparse(MessagePassing):
     """ Different from the above since it separates the edge assignment
         from the computation (this allows for great reduction in time and 
@@ -535,6 +1044,7 @@ class EGNN_Sparse(MessagePassing):
     def __init__(
         self,
         feats_dim,
+        out_feats_dim = 100,
         pos_dim=3,
         orient_dim=1,
         edge_attr_dim = 0,
@@ -559,6 +1069,7 @@ class EGNN_Sparse(MessagePassing):
         # model params
         self.fourier_features = fourier_features
         self.feats_dim = feats_dim
+        self.out_feats_dim = out_feats_dim
         self.pos_dim = pos_dim
         self.orient_dim = orient_dim
         self.m_dim = m_dim
@@ -575,13 +1086,6 @@ class EGNN_Sparse(MessagePassing):
 
 
         # EDGES
-        # self.edge_mlp = nn.Sequential(
-        #     nn.Linear(self.edge_input_dim, self.edge_input_dim * 2),
-        #     self.dropout,
-        #     SiLU(),
-        #     nn.Linear(self.edge_input_dim * 2, m_dim),
-        #     SiLU()
-        # )
         self.edge_mlp = nn.Sequential(
             nn.Linear(self.edge_input_dim, self.edge_input_dim * 10),
             self.dropout,
@@ -614,15 +1118,10 @@ class EGNN_Sparse(MessagePassing):
             nn.Linear(feats_dim * 20, feats_dim * 10),
             self.dropout,
             SiLU(),
-            nn.Linear(feats_dim * 10, feats_dim),
+            nn.Linear(feats_dim * 10, self.out_feats_dim),
         ) if update_feats else None
 
-        # self.node_mlp = nn.Sequential(
-        #     nn.Linear(feats_dim + m_dim, feats_dim * 2),
-        #     self.dropout,
-        #     SiLU(),
-        #     nn.Linear(feats_dim * 2, feats_dim),
-        # ) if update_feats else None
+
 
         # COORS
         self.coors_mlp = nn.Sequential(
@@ -644,20 +1143,7 @@ class EGNN_Sparse(MessagePassing):
             SiLU(),
             nn.Linear(self.m_dim * 32, 1)
         ) if update_orients else None
-        # # COORS
-        # self.coors_mlp = nn.Sequential(
-        #     nn.Linear(m_dim, m_dim * 4),
-        #     self.dropout,
-        #     SiLU(),
-        #     nn.Linear(self.m_dim * 4, 1)
-        # ) if update_coors else None
 
-        # self.orients_mlp = nn.Sequential(
-        #     nn.Linear(m_dim, m_dim * 4),
-        #     self.dropout,
-        #     SiLU(),
-        #     nn.Linear(self.m_dim * 4, 1)
-        # ) if update_orients else None
 
 
         self.apply(self.init_)
@@ -682,38 +1168,13 @@ class EGNN_Sparse(MessagePassing):
         # coors, feats = x[:, :self.pos_dim], x[:, self.pos_dim+2:] # legacy
         coors = x[:, :self.pos_dim]
         orient = x[:, self.pos_dim:self.pos_dim+self.orient_dim]
-        # orient_feats = torch.sin(orient)
-        # feats = x[:, self.pos_dim+self.orient_dim:]
         feats = x[:, self.pos_dim:]
-
-        # feats = torch.cat([orient_feats, feats], dim=-1)
-
         # normalize coords into range between -1 and 1
         coors = normalize(coors)
 
         rel_coors = coors[edge_index[0]] - coors[edge_index[1]]
         rel_dist  = (rel_coors ** 2).sum(dim=-1, keepdim=True)
 
-        # # relative angle (subtract angle)
-        # cartesian_i = torch.polar(
-        #         torch.ones_like(orient[edge_index[0]]), # on unit-circle 
-        #         torch.deg2rad(orient[edge_index[0]])
-        #         )
-        # cartesian_j = torch.polar(
-        #         torch.ones_like(orient[edge_index[1]]), # on unit-circle
-        #         torch.deg2rad(orient[edge_index[1]])
-        #         )
-
-        # sin = torch.sin(
-        #     # torch.deg2rad(
-        #         orient[edge_index[0]] - orient[edge_index[1]]
-        #         # )
-        #     )
-        # cos = torch.cos(
-        #     # torch.deg2rad(
-        #         orient[edge_index[0]] - orient[edge_index[1]]
-        #         # )
-        #     )
         rel_sin = torch.sin(
                 orient[edge_index[0]] - orient[edge_index[1]]
             )
@@ -721,29 +1182,10 @@ class EGNN_Sparse(MessagePassing):
                 orient[edge_index[0]] - orient[edge_index[1]]
             )
 
-        # sin = torch.sin(orient[edge_index[0]]) - torch.sin(orient[edge_index[1]])
-        # cos = torch.cos(orient[edge_index[0]]) - torch.cos(orient[edge_index[1]])
-
-
-
-        # sin = normalize(sin)
-        # cos = normalize(cos)
 
 
 
         rel_orients = torch.cat((rel_sin, rel_cos), dim=-1)
-        # # self.orient_dist2norm = lambda alpha: torch.sqrt(alpha[:,0]**2 + alpha[:,1]**2).unsqueeze(-1)
-        # self.orient_dist2norm = lambda alpha: (alpha[:,0]**2 + alpha[:,1]**2).unsqueeze(-1)
-        # self.orient_dist2norm = lambda alpha: (alpha[:,0] + alpha[:,1]).unsqueeze(-1)
-
-        # rel_orient_dist = self.orient_dist2norm(rel_orients)
-        # print(rel_orients.size())
-
-        # rel_orients = cartesian_i - cartesian_j
-        # self.complex_dist = lambda rel: torch.sqrt((rel.real)**2 + (rel.imag)**2)
-        # self.complex_dist = lambda rel: (rel.real)**2 + (rel.imag)**2
-
-        # rel_orient_dist = self.complex_dist(rel_orients)
 
 
 
@@ -756,7 +1198,6 @@ class EGNN_Sparse(MessagePassing):
             edge_attr_feats = torch.cat([edge_attr, rel_dist], dim=-1)
         else:
             # edge_attr_feats = rel_dist
-            # edge_attr_feats = torch.cat([rel_dist, rel_orient_dist], dim=-1)
             edge_attr_feats = torch.cat([rel_dist, rel_sin, rel_cos], dim=-1)
 
 
@@ -768,7 +1209,6 @@ class EGNN_Sparse(MessagePassing):
 
         x_new =torch.cat([coors_out, hidden_out], dim=-1) # legacy
         # x_new =torch.cat([coors_out, orient, hidden_out], dim=-1)
-
 
         return x_new
 
@@ -816,16 +1256,6 @@ class EGNN_Sparse(MessagePassing):
             coors_out = kwargs["coors"]
 
 
-        # if self.update_orients:
-        #     orient_wij = self.orients_mlp(m_ij)
-        #     # if self.orient_weights_clamp_value:
-        #     #     orient_weights_clamp_value = self.orient_weights_clamp_value
-        #     #     orient_weights.clamp_(min = -clamp_value, max = clamp_value)
-        #     kwargs['rel_orients'] = self.coors_norm(kwargs['rel_orients']) # SE3 Transformers norm
-        #     nhat_i = self.aggregate(orient_wij * kwargs["rel_orients"], **aggr_kwargs)
-        #     orients_out = kwargs['orients'] + nhat_i
-
-
 
         # update feats if specified
         if self.update_feats:
@@ -836,14 +1266,10 @@ class EGNN_Sparse(MessagePassing):
 
             hidden_feats = self.node_norm(kwargs["x"], kwargs["batch"]) if self.node_norm else kwargs["x"]
             hidden_out = self.node_mlp( torch.cat([hidden_feats, m_i], dim = -1) )
-            hidden_out = kwargs["x"] + hidden_out
-        else: 
-            hidden_out = kwargs["x"]
+            # hidden_out = kwargs["x"] + hidden_out
 
-        # return tuple
-        # print(type(self.update))
+
         return self.update((hidden_out, coors_out), **update_kwargs)
-
     def __repr__(self):
         dict_print = {}
         return "E(n)-GNN Layer for Graphs " + str(self.__dict__) 
@@ -945,35 +1371,59 @@ class EGNN_Sparse_Network(nn.Module):
             self.global_tokens = nn.Parameter(torch.randn(num_global_tokens, dim))
         
         # instantiate layers
-        layer_size_multiplicators = [1,1,1]
+
+        block1 = EGNN_Sparse(feats_dim = feats_dim,
+                            out_feats_dim=100,
+                            pos_dim = pos_dim,
+                            orient_dim = orient_dim,
+                            edge_attr_dim = edge_attr_dim,
+                            m_dim = m_dim,
+                            fourier_features = fourier_features, 
+                            soft_edge = soft_edge, 
+                            norm_feats = norm_feats,
+                            norm_coors = norm_coors,
+                            norm_coors_scale_init = norm_coors_scale_init, 
+                            update_feats = update_feats,
+                            update_coors = update_coors, 
+                            dropout = dropout, 
+                            coor_weights_clamp_value = coor_weights_clamp_value)
+        self.mpnn_layers.append(block1)
+        
 
 
-        for i in range(n_layers):
-            layer = EGNN_Sparse(feats_dim = feats_dim*layer_size_multiplicators[i],
-                                pos_dim = pos_dim,
-                                orient_dim = orient_dim,
-                                edge_attr_dim = edge_attr_dim,
-                                m_dim = m_dim,
-                                fourier_features = fourier_features, 
-                                soft_edge = soft_edge, 
-                                norm_feats = norm_feats,
-                                norm_coors = norm_coors,
-                                norm_coors_scale_init = norm_coors_scale_init, 
-                                update_feats = update_feats,
-                                update_coors = update_coors, 
-                                dropout = dropout, 
-                                coor_weights_clamp_value = coor_weights_clamp_value)
+        block2 = EGNN_Sparse(feats_dim = 100,
+                            out_feats_dim=200,
+                            pos_dim = pos_dim,
+                            orient_dim = orient_dim,
+                            edge_attr_dim = edge_attr_dim,
+                            m_dim = m_dim,
+                            fourier_features = fourier_features, 
+                            soft_edge = soft_edge, 
+                            norm_feats = norm_feats,
+                            norm_coors = norm_coors,
+                            norm_coors_scale_init = norm_coors_scale_init, 
+                            update_feats = update_feats,
+                            update_coors = update_coors, 
+                            dropout = dropout, 
+                            coor_weights_clamp_value = coor_weights_clamp_value)
+        self.mpnn_layers.append(block2)
+        block3 = EGNN_Sparse(feats_dim = 200,
+                            out_feats_dim=100,
+                            pos_dim = pos_dim,
+                            orient_dim = orient_dim,
+                            edge_attr_dim = edge_attr_dim,
+                            m_dim = m_dim,
+                            fourier_features = fourier_features, 
+                            soft_edge = soft_edge, 
+                            norm_feats = norm_feats,
+                            norm_coors = norm_coors,
+                            norm_coors_scale_init = norm_coors_scale_init, 
+                            update_feats = update_feats,
+                            update_coors = update_coors, 
+                            dropout = dropout, 
+                            coor_weights_clamp_value = coor_weights_clamp_value)
+        self.mpnn_layers.append(block3)
 
-            # global attention case
-            is_global_layer = self.has_global_attn and (i % self.global_linear_attn_every) == 0
-            if is_global_layer:
-                attn_layer = GlobalLinearAttention(dim = self.feats_dim, 
-                                                   heads = global_linear_attn_heads, 
-                                                   dim_head = global_linear_attn_dim_head)
-                self.mpnn_layers.append(nn.ModuleList([layer, attn_layer]))
-            # normal case
-            else: 
-                self.mpnn_layers.append(layer)
 
 
         # #########################
@@ -996,10 +1446,6 @@ class EGNN_Sparse_Network(nn.Module):
                             SiLU(),
                             torch.nn.LazyLinear(25),
             )
-
-
-        # self.classifier = ClassificationLSTM(13, 25, 5, 10)
-        # #########################
             
 
     def forward(self, x, edge_index, batch, edge_attr,
@@ -1024,22 +1470,14 @@ class EGNN_Sparse_Network(nn.Module):
 
 
         # regulates wether to embedd edges each layer
-        # edges_need_embedding = True  
         edges_need_embedding = False  
         for i,layer in enumerate(self.mpnn_layers):
-            # attn tokens
-            # global_tokens = None
 
             # pass layers
             is_global_layer = self.has_global_attn and (i % self.global_linear_attn_every) == 0
             if not is_global_layer:
                 x = layer(x, edge_index, edge_attr, batch=batch, size=bsize)
 
-            # # recalculate edge info - not needed if last layer
-            # if self.recalc and ((i%self.recalc == 0) and not (i == len(self.mpnn_layers)-1)) :
-            #     edge_index, edge_attr, _ = recalc_edge(x) # returns attr, idx, any_other_info
-            #     edges_need_embedding = True
-            
 
         max_node = (x.max(dim=0)[0]).unsqueeze(0)
 
@@ -1053,9 +1491,10 @@ class EGNN_Sparse_Network(nn.Module):
 
         x = torch.cat([max_node, global_feature], dim=1)
 
-        x = self.classifier(x)#.squeeze(0)
+        x = self.classifier(x)
 
         return x
 
     def __repr__(self):
         return 'EGNN_Sparse_Network of: {0} layers'.format(len(self.mpnn_layers))
+
