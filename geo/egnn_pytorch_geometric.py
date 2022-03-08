@@ -524,8 +524,6 @@ class Baseline_EGNN_Sparse_Network(nn.Module):
 
 
 
-
-
 # define pytorch-geometric equivalents
 class EGNN_Sparse(MessagePassing):
     """ Different from the above since it separates the edge assignment
@@ -587,10 +585,10 @@ class EGNN_Sparse(MessagePassing):
             nn.Linear(self.edge_input_dim, self.edge_input_dim * 10),
             self.dropout,
             SiLU(),
-            nn.Linear(self.edge_input_dim*10, self.edge_input_dim * 30),
+            nn.Linear(self.edge_input_dim*10, self.edge_input_dim * 20),
             self.dropout,
             SiLU(),
-            nn.Linear(self.edge_input_dim* 30, self.edge_input_dim * 10),
+            nn.Linear(self.edge_input_dim * 20, self.edge_input_dim * 10),
             self.dropout,
             SiLU(),
             nn.Linear(self.edge_input_dim * 10, m_dim),
@@ -609,10 +607,10 @@ class EGNN_Sparse(MessagePassing):
             nn.Linear(feats_dim + m_dim, feats_dim * 10),
             self.dropout,
             SiLU(),
-            nn.Linear(feats_dim*10, feats_dim * 30),
+            nn.Linear(feats_dim*10, feats_dim * 20),
             self.dropout,
             SiLU(),
-            nn.Linear(feats_dim*30, feats_dim * 10),
+            nn.Linear(feats_dim * 20, feats_dim * 10),
             self.dropout,
             SiLU(),
             nn.Linear(feats_dim * 10, feats_dim),
@@ -630,10 +628,10 @@ class EGNN_Sparse(MessagePassing):
             nn.Linear(m_dim, m_dim * 10),
             self.dropout,
             SiLU(),
-            nn.Linear(m_dim*10, m_dim * 30),
+            nn.Linear(m_dim*10, m_dim * 20),
             self.dropout,
             SiLU(),
-            nn.Linear(m_dim * 30, m_dim * 10),
+            nn.Linear(m_dim * 20, m_dim * 10),
             self.dropout,
             SiLU(),
             nn.Linear(self.m_dim * 10, 1)
@@ -849,6 +847,16 @@ class EGNN_Sparse(MessagePassing):
         dict_print = {}
         return "E(n)-GNN Layer for Graphs " + str(self.__dict__) 
 
+class ClassificationLSTM(nn.Module):
+    def __init__(self, input_size, hidden_size, num_layers, num_classes):
+        super(ClassificationLSTM, self).__init__()
+        self.l1 = nn.LSTM(input_size=input_size, hidden_size=hidden_size, num_layers=num_layers, batch_first=True)
+        self.out = nn.Linear(hidden_size, num_classes)
+    def forward(self, x):
+        r_out, (h_n, h_c) = self.l1(x, None) #None represents zero initial hidden state
+        out = self.out(r_out[:, -1, :])
+        return out
+
 
 class EGNN_Sparse_Network(nn.Module):
     r"""Sample GNN model architecture that uses the EGNN-Sparse
@@ -910,17 +918,6 @@ class EGNN_Sparse_Network(nn.Module):
         self.edge_embedding_dims = edge_embedding_dims
         self.edge_emb_layers     = nn.ModuleList()
 
-        # instantiate point and edge embedding layers
-
-        # for i in range( len(self.embedding_dims) ):
-        #     self.emb_layers.append(nn.Embedding(num_embeddings = embedding_nums[i],
-        #                                         embedding_dim  = embedding_dims[i]))
-        #     feats_dim += embedding_dims[i] - 1
-
-        # for i in range( len(self.edge_embedding_dims) ):
-        #     self.edge_emb_layers.append(nn.Embedding(num_embeddings = edge_embedding_nums[i],
-        #                                              embedding_dim  = edge_embedding_dims[i]))
-        #     edge_attr_dim += edge_embedding_dims[i] - 1
         # rest
         self.mpnn_layers      = nn.ModuleList()
         self.feats_dim        = feats_dim
@@ -982,8 +979,21 @@ class EGNN_Sparse_Network(nn.Module):
         self.classifier = torch.nn.Sequential(
                             torch.nn.LazyLinear(20),
                             torch.nn.ReLU(),
+                            torch.nn.LazyLinear(20),
+                            torch.nn.ReLU(),
                             torch.nn.LazyLinear(10),
                     )
+
+        self.local_classifier = torch.nn.Sequential(
+                            torch.nn.LazyLinear(20),
+                            torch.nn.ReLU(),
+                            torch.nn.LazyLinear(40),
+                            torch.nn.ReLU(),
+                            torch.nn.LazyLinear(25),
+            )
+
+
+        # self.classifier = ClassificationLSTM(13, 25, 5, 10)
         # #########################
             
 
@@ -1012,40 +1022,46 @@ class EGNN_Sparse_Network(nn.Module):
         # edges_need_embedding = True  
         edges_need_embedding = False  
         for i,layer in enumerate(self.mpnn_layers):
-            
-            # EDGES - Embedd each dim to its target dimensions:
-            # if edges_need_embedding:
-            #     edge_attr = embedd_token(edge_attr, self.edge_embedding_dims, self.edge_emb_layers)
-            #     edges_need_embedding = False
-            #     print('---------')
-
             # attn tokens
-            global_tokens = None
-            # if exists(self.global_tokens):
-            #     unique, amounts = torch.unique(batch, return_counts)
-            #     num_idxs = torch.cat([torch.arange(num_idxs_i) for num_idxs_i in amounts], dim=-1)
-            #     global_tokens = self.global_tokens[num_idxs]
+            # global_tokens = None
 
             # pass layers
             is_global_layer = self.has_global_attn and (i % self.global_linear_attn_every) == 0
             if not is_global_layer:
                 x = layer(x, edge_index, edge_attr, batch=batch, size=bsize)
-            # else: 
-            #     # only pass feats to the attn layer
-            #     x_attn = layer[0](x[:, self.pos_dim:], global_tokens)
-            #     # merge attn-ed feats and coords
-            #     x = torch.cat( (x[:, :self.pos_dim], x_attn), dim=-1)
-            #     x = layer[-1](x, edge_index, edge_attr, batch=batch, size=bsize)
 
-            # recalculate edge info - not needed if last layer
-            if self.recalc and ((i%self.recalc == 0) and not (i == len(self.mpnn_layers)-1)) :
-                edge_index, edge_attr, _ = recalc_edge(x) # returns attr, idx, any_other_info
-                edges_need_embedding = True
+            # # recalculate edge info - not needed if last layer
+            # if self.recalc and ((i%self.recalc == 0) and not (i == len(self.mpnn_layers)-1)) :
+            #     edge_index, edge_attr, _ = recalc_edge(x) # returns attr, idx, any_other_info
+            #     edges_need_embedding = True
             
-        
 
-        # x = self.classifier(x)
+        max_node = (x.max(dim=0)[0]).unsqueeze(0)
+        mean_nodes = x.mean(dim=0).unsqueeze(0)
 
+        # x = torch.cat([node for node in x[:]], dim=0)
+
+        shared_output = torch.zeros(25)
+
+
+        # processed_local_features = torch.zeros(x.size(0), 25)
+
+
+        for i, node in enumerate(x[:]):
+            # print(node.size())
+            # processed_local_features[i] = self.local_classifier(node)
+            shared_output += self.local_classifier(node)
+
+        # global_feature = processed_local_features.max(dim=0)[0]
+
+        x = torch.cat([max_node, mean_nodes, shared_output.unsqueeze(0)], dim=1)
+        # print(x.unsqueeze(0).size())
+        # print(x.size())
+        # print(x.unsqueeze(0).size())
+        # x = self.classifier(x.unsqueeze(0))#.squeeze(0)
+        x = self.classifier(x)#.squeeze(0)
+
+        # print(x.size())
         return x
 
     def __repr__(self):
